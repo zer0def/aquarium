@@ -1,0 +1,2 @@
+#!/bin/sh
+KATA_CONF_FILE=/usr/local/share/defaults/kata-containers/configuration-fc.toml $(dirname $(readlink -f ${0}))/containerd-shim-kata-v2 ${@}

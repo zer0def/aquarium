@@ -1,0 +1,442 @@
+{{/* KUBECONFIG=$(k3d get-kubeconfig) helmfile --no-color --allow-no-matching-release -f k3d-helmfile.yaml -l name!=kubeless sync */}}
+
+{{- $helmTimeout := default 86400 (env "HELM_TIMEOUT") -}}
+
+{{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
+{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istioInit" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "istioPrometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_PROMETHEUS_OPERATOR")) "istio" (default "istio" (env "RELEASES_ISTIO")) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusOperator" (default "prometheus-operator" (env "RELEASES_PROMETHEUS_OPERATOR")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
+{{- $versions := dict "certManager" (default "0.11.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "1.10.2" (env "VERSIONS_HARBOR")) "istio" (default "1.5.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.17.0" (env "VERSIONS_JAEGER")) "openebs" (default "1.9.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.4.9" (env "VERSIONS_OPENEBS_NDM")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
+{{- $istioMajor := slice (splitList "." $versions.istio) 0 2 | join "." -}}
+
+{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "coreDbName" (default "harbor_core" (env "HARBOR_CORE_DB_NAME")) "clairDbName" (default "harbor_clair" (env "HARBOR_CLAIR_DB_NAME")) "notaryServerDbName" (default "harbor_notary_server" (env "HARBOR_NOTARY_SERVER_DB_NAME")) "notarySignerDbName" (default "harbor_notary_signer" (env "HARBOR_NOTARY_SIGNER_DB_NAME")) "dbUser" (default "harbor" (env "HARBOR_DB_USER")) "dbPass" (default "harbor" (env "HARBOR_DB_PASS")) -}}
+{{- $minio := dict "accessKey" (default "AKIAIOSFODNN7EXAMPLE" (env "MINIO_ACCESS_KEY")) "secretKey" (default "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" (env "MINIO_SECRET_KEY")) "servicePort" (default 9000 (env "MINIO_SVC_PORT")) "defaultBucket" (default "minio-bucket" (env "MINIO_DEFAULT_BUCKET")) -}}
+
+{{- $openebsOmitLoopDevs := default "" (env "OPENEBS_OMIT_LOOPDEVS") -}}
+{{- if $openebsOmitLoopDevs -}}
+  {{- $openebsOmitLoopDevs = printf ",%s" $openebsOmitLoopDevs -}}
+{{- end -}}
+
+{{- $redisPassword := default "redis" (env "REDIS_PASSWORD") -}}
+{{- $thanosObjstoreConfig := dict "secret" (default "thanos-objstore-config" (env "THANOS_OBJSTORE_CONFIG_SECRET")) "filename" (default "object-store.yaml" (env "THANOS_OBJSTORE_CONFIG_FILENAME")) -}}
+
+repositories:
+- name: stable
+  url: https://kubernetes-charts.storage.googleapis.com
+- name: incubator
+  url: https://kubernetes-charts-incubator.storage.googleapis.com
+#- name: jetstack  # cert-manager
+#  url: https://charts.jetstack.io
+- name: istio{{ $istioMajor }}
+  url: https://storage.googleapis.com/istio-release/releases/{{ $versions.istio }}/charts
+- name: banzaicloud  # thanos, src: https://github.com/banzaicloud/banzai-charts
+  url: https://kubernetes-charts.banzaicloud.com
+- name: jaegertracing  # jaeger, src: https://github.com/jaegertracing/helm-charts
+  url: https://jaegertracing.github.io/helm-charts
+#- name: openebs  # deprecated
+#  url: https://openebs.github.io/charts
+- name: harbor  # harbor, src: https://github.com/goharbor/harbor-helm
+  url: https://helm.goharbor.io
+
+helmDefaults:
+  wait: true
+  timeout: {{ $helmTimeout }}
+  tillerless: false
+
+releases:
+# network components
+- name: {{ $releases.istioInit }}
+  namespace: {{ $namespaces.network }}
+  chart: istio{{ $istioMajor }}/istio-init
+  values:
+  - certmanager:
+      enabled: true
+- name: {{ $releases.jaegerOperator }}
+  namespace: {{ $namespaces.network }}
+  chart: jaegertracing/jaeger-operator
+  values:
+  - fullnameOverride: {{ $releases.jaegerOperator | quote }}
+    image:
+      tag: {{ $versions.jaeger }}
+    jaeger:
+      create: true
+      spec:  # https://www.jaegertracing.io/docs/1.16/operator/
+        strategy: allInOne
+        ingress:
+          enabled: false
+    # https://github.com/jaegertracing/jaeger-operator/issues/791
+    rbac:
+      clusterRole: true
+- name: {{ $releases.istio }}
+  namespace: {{ $namespaces.network }}
+  chart: istio{{ $istioMajor }}/istio
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istioInit }}
+  - {{ $namespaces.network }}/{{ $releases.jaegerOperator }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args: ["-xec", "kubectl -n {{ $namespaces.network }} wait --for condition=complete --timeout {{ $helmTimeout }}s job --all"]
+  values:
+  - fullnameOverride: {{ $releases.istio | quote }}
+    global:
+      tag: {{ $versions.istio }}
+      disablePolicyChecks: false
+      mtls:
+        enabled: true
+      outboundTrafficPolicy:
+        mode: ALLOW_ANY
+      proxy:
+        accessLogFile: /dev/stdout
+      sds:
+        enabled: true
+        udsPath: "unix:/var/run/sds/uds_path"
+      #k8sIngress:
+      #  enabled: true
+      #  enableHttps: true
+      #  gatewayName: ingressgateway
+    certmanager:
+      enabled: true
+    gateways:
+      istio-ingressgateway:
+        type: NodePort
+        sds:
+          enabled: true
+      istio-egressgateway:
+        type: NodePort
+        enabled: true
+    grafana:
+      enabled: true
+    kiali:
+      enabled: true
+      createDemoSecret: true
+      dashboard:
+        grafanaURL: "http://grafana.{{ $namespaces.network }}.svc:3000"
+        jaegerURL: "http://{{ $releases.jaegerOperator }}-jaeger-query.{{ $namespaces.network }}.svc:16686"
+    mixer:
+      adapters:
+        stdio:
+          enabled: true
+      policy:
+        enabled: true
+      telemetry:
+        enabled: true
+    nodeagent:
+      enabled: true
+      env:
+        CA_PROVIDER: Citadel
+        CA_ADDR: "istio-citadel.{{ $namespaces.network }}.svc:8060"
+        VALID_TOKEN: true
+    #prometheus:
+    #  enabled: false
+    security:
+      citadelHealthCheck: true
+    sidecarInjectorWebhook:
+      enabled: true
+    #tracing:
+    #  enabled: true
+    #  #provider: zipkin
+
+# https://github.com/coreos/prometheus-operator/issues/2502
+# https://github.com/istio/installer/pull/71
+- name: {{ $releases.istioPrometheusOperator }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/istio-telemetry/prometheus-operator
+  needs:
+  - {{ $namespaces.monitoring }}/{{ $releases.prometheusOperator }}
+  - {{ $namespaces.network }}/{{ $releases.istio }}
+  values:
+  - global:
+      telemetryNamespace: {{ $namespaces.network }}
+
+# storage components
+- name: {{ $releases.openebs }}
+  namespace: {{ $namespaces.storage }}
+  chart: stable/openebs
+  values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
+  - fullnameOverride: {{ $releases.openebs | quote }}
+    analytics:
+      enabled: false
+    release:
+      version: {{ $versions.openebs }}
+    apiserver:  # not needed for just local PV
+      enabled: false
+      replicas: 0
+      imageTag: {{ $versions.openebs }}
+    provisioner:  # not needed for just local PV
+      enabled: false
+      replicas: 0
+      imageTag: {{ $versions.openebs }}
+    localprovisioner:
+      enabled: true
+      imageTag: {{ $versions.openebs }}
+    snapshotOperator:  # not needed for just local PV
+      enabled: false
+      replicas: 0
+      controller:
+        imageTag: {{ $versions.openebs }}
+      provisioner:
+        imageTag: {{ $versions.openebs }}
+    webhook:  # not needed for just local PV
+      enabled: false
+      replicas: 0
+      imageTag: {{ $versions.openebs }}
+    jiva:
+      imageTag: {{ $versions.openebs }}
+    cstor:
+      pool:
+        imageTag: {{ $versions.openebs }}
+      poolMgmt:
+        imageTag: {{ $versions.openebs }}
+      target:
+        imageTag: {{ $versions.openebs }}
+      volumeMgmt:
+        imageTag: {{ $versions.openebs }}
+    helper:
+      imageTag: {{ $versions.openebs }}
+    policies:
+      monitoring:
+        imageTag: {{ $versions.openebs }}
+    ndmOperator:
+      imageTag: v{{ $versions.openebsNdm }}
+    ndm:
+      imageTag: v{{ $versions.openebsNdm }}
+      filters:
+        excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}"
+        includePaths: "/dev/loop"
+- name: {{ $releases.minio }}
+  namespace: {{ $namespaces.storage }}
+  chart: stable/minio
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.openebs }}
+  values:
+  - fullnameOverride: {{ $releases.minio | quote }}
+    accessKey: {{ $minio.accessKey | quote }}
+    secretKey: {{ $minio.secretKey | quote }}
+    service:
+      port: {{ $minio.servicePort }}
+      clusterIP: None
+    persistence:  # parameterize based on presence of OpenEBS
+      enabled: false
+    defaultBucket:
+      name: {{ $minio.defaultBucket | quote }}
+      enabled: true
+- name: {{ $releases.patroni }}
+  namespace: {{ $namespaces.storage }}
+  chart: ./zer0def-charts/incubator/patroni
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.openebs }}
+  values:
+  - fullnameOverride: {{ $releases.patroni | quote }}
+    replicaCount: 1
+    databases:
+    - name: {{ $harbor.coreDbName | quote }}
+      user: {{ $harbor.dbUser | quote }}
+      pass: {{ $harbor.dbPass | quote }}
+    - name: {{ $harbor.clairDbName | quote }}
+      user: {{ $harbor.dbUser | quote }}
+      pass: {{ $harbor.dbPass | quote }}
+    - name: {{ $harbor.notaryServerDbName | quote }}
+      user: {{ $harbor.dbUser | quote }}
+      pass: {{ $harbor.dbPass | quote }}
+    - name: {{ $harbor.notarySignerDbName | quote }}
+      user: {{ $harbor.dbUser | quote }}
+      pass: {{ $harbor.dbPass | quote }}
+    env:
+      ALLOW_NOSSL: "true"
+    image:
+      #repository: registry.opensource.zalan.do/acid/spilo-11
+      #tag: 1.6-p1
+      repository: registry.opensource.zalan.do/acid/spilo-12
+      tag: 1.6-p2
+    persistentVolume:
+      size: 10G
+- name: {{ $releases.redis }}
+  namespace: {{ $namespaces.storage }}
+  chart: stable/redis-ha
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.openebs }}
+  values:
+  - fullnameOverride: {{ $releases.redis | quote }}
+    hardAntiAffinity: false
+    image:
+      tag: 5-alpine
+    haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
+      enabled: true
+      stickyBalancing: true
+      hardAntiAffinity: false
+      readOnly:
+        enabled: true
+    #auth: true
+    #redisPassword: {{ $redisPassword }}
+- name: {{ $releases.harbor }}
+  namespace: {{ $namespaces.storage }}
+  chart: harbor/harbor
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.minio }}
+  - {{ $namespaces.storage }}/{{ $releases.patroni }}
+  - {{ $namespaces.storage }}/{{ $releases.redis }}
+  values:
+  - nameOverride: {{ $releases.harbor | quote }}
+    # default admin username for Harbor is `admin`
+    harborAdminPassword: {{ $harbor.adminPassword | quote }}
+    externalURL: "https://{{ $harbor.coreHostname }}"
+    expose:  # by default, service is `ingress`
+      type: nodePort
+      ingress:
+        annotations:  # be sure to suffix registry with `:80` when pushing images
+          ingress.kubernetes.io/ssl-redirect: "false"
+          nginx.ingress.kubernetes.io/ssl-redirect: "false"
+        hosts:
+          core: {{ $harbor.coreHostname }}
+      nodePort:
+        ports:
+          http:
+            nodePort: {{ $harbor.httpNodePort }}
+      tls:
+        enabled: false
+    persistence:
+      imageChartStorage:
+        disableredirect: true
+        type: s3
+        s3:
+          accesskey: {{ $minio.accessKey | quote }}
+          secretkey: {{ $minio.secretKey | quote }}
+          bucket: {{ $minio.defaultBucket | quote }}
+          # if using insecure object storage endpoints, you need to prefix it with `http://` protocol for chartmuseum to not barf
+          secure: false
+          regionendpoint: "http://minio.{{ $namespaces.storage }}.svc:{{ $minio.servicePort }}"
+    database:
+      type: external
+      external:
+        host: {{ $releases.patroni }}.{{ $namespaces.storage }}.svc
+        username: {{ $harbor.dbUser | quote }}
+        password: {{ $harbor.dbPass | quote }}
+        coreDatabase: {{ $harbor.coreDbName | quote }}
+        clairDatabase: {{ $harbor.clairDbName | quote }}
+        notaryServerDatabase: {{ $harbor.notaryServerDbName | quote }}
+        notarySignerDatabase: {{ $harbor.notarySignerDbName | quote }}
+    redis:
+      type: external
+      external:
+        host: {{ $releases.redis }}-haproxy.{{ $namespaces.storage }}.svc
+        #password: {{ $redisPassword | quote }}
+    nginx:
+      image:
+        tag: v{{ $versions.harbor }}
+    portal:
+      image:
+        tag: v{{ $versions.harbor }}
+    core:
+      image:
+        tag: v{{ $versions.harbor }}
+    jobservice:
+      jobLogger: database
+      image:
+        tag: v{{ $versions.harbor }}
+    registry:
+      registry:
+        image:
+          tag: v{{ $versions.harbor }}
+      controller:
+        image:
+          tag: v{{ $versions.harbor }}
+    chartmuseum:
+      image:
+        tag: v{{ $versions.harbor }}
+    clair:
+      clair:
+        image:
+          tag: v{{ $versions.harbor }}
+      adapter:
+        image:
+          tag: v{{ $versions.harbor }}
+    trivy:
+      image:
+        tag: v{{ $versions.harbor }}
+    notary:
+      server:
+        image:
+          tag: v{{ $versions.harbor }}
+      signer:
+        image:
+          tag: v{{ $versions.harbor }}
+
+# monitoring
+- name: {{ $releases.thanos }}
+  namespace: {{ $namespaces.monitoring }}
+  chart: banzaicloud/thanos
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.minio }}
+  values:
+  - fullnameOverride: {{ $releases.thanos | quote }}
+    objstoreSecretOverride: {{ $thanosObjstoreConfig.secret | quote }}
+    image:
+      tag: 'v{{ $versions.thanos }}'
+    compact:
+      retentionResolutionRaw: 3d
+      retentionResolution5m: 16d
+      retentionResolution1h: 28d
+- name: {{ $releases.prometheusOperator }}
+  namespace: {{ $namespaces.monitoring }}
+  chart: stable/prometheus-operator
+  needs:
+  - {{ $namespaces.monitoring }}/{{ $releases.thanos }}
+  values:
+  - fullnameOverride: {{ $releases.prometheusOperator | quote }}
+    prometheus:
+      prometheusSpec:
+        podMetadata:
+          labels:
+            prometheus: self
+        #serviceMonitorNamespaceSelector: {}
+        serviceMonitorSelector:
+          matchLabels: {}  # match *ALL* ServiceMonitors on an *empty* set of labels
+        #podMonitorNamespaceSelector: {}
+        podMonitorSelector:
+          matchLabels: {}  # match *ALL* PodMonitors on an *empty* set of labels
+        retention: 3h
+        thanos:  # https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#thanosspec
+          version: v{{ $versions.thanos }}
+          objectStorageConfig:
+            key: {{ $thanosObjstoreConfig.filename }}
+            name: {{ $thanosObjstoreConfig.secret }}
+    grafana:
+      sidecar:
+        datasources:
+          defaultDatasourceEnabled: false
+      additionalDataSources:
+      - name: Thanos
+        type: prometheus
+        url: "http://thanos-query-http.{{ $namespaces.monitoring }}.svc:10902/"
+        access: proxy
+        isDefault: true
+
+# serverless
+- name: {{ $releases.kubeless }}
+  namespace: {{ $namespaces.serverless }}
+  # should be installing upstream incubator/kubeless chart, but it's shit
+  chart: ./zer0def-charts/incubator/kubeless
+  values:
+  - nameOverride: {{ $releases.kubeless | quote }}
+    rbac:
+      create: true
+    controller:
+      deployment:
+        functionController:
+          image:
+            tag: v1.0.6
+        httpTriggerController:
+          image:
+            tag: v1.0.2
+        cronJobTriggerController:
+          image:
+            tag: v1.0.2
+    kafkaTrigger:
+      deployment:
+        image:
+          tag: v1.0.2
+    config:
+      functionsNamespace: {{ $namespaces.serverlessFunctions }}
+    ui:
+      enabled: true
+      service:
+        type: ClusterIP
