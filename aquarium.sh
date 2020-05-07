@@ -21,6 +21,7 @@ KUBE_NOPROXY_SETTING=(
 K3D_OPTS=()
 KUBEDEE_OPTS=()
 K3D_LIB_MOUNTS_ALL=()
+MYDIR="$(dirname $(readlink -f ${0}))"
 
 string_join() { local IFS="$1"; shift; echo "$*"; }
 
@@ -60,7 +61,7 @@ kata_pre::k3d(){
     '-v' '/usr/lib/kata-containers:/usr/local/lib/kata-containers'
     '-v' '/usr/share/kata-containers:/usr/local/share/kata-containers'
     '-v' '/usr/share/qemu:/usr/local/share/qemu'
-    '-v' "$(dirname $(readlink -f ${0}))/kata-containers/config:/usr/local/share/defaults/kata-containers"
+    '-v' "${MYDIR}/kata-containers/config:/usr/local/share/defaults/kata-containers"
   ) \
   && K3D_LIB_MOUNTS_ALL+=('-v /usr/lib/ld-linux-x86-64.so.2:/lib64/ld-linux-x86-64.so.2') \
   && for i in containerd-shim-kata-v2 kata-runtime qemu-system-x86_64 firecracker jailer cloud-hypervisor virtiofsd; do
@@ -76,7 +77,7 @@ kata_pre::k3d(){
   && for i in qemu fc clh; do
     # https://github.com/kata-containers/documentation/blob/master/how-to/containerd-kata.md
     # https://github.com/kata-containers/packaging/blob/master/kata-deploy/scripts/kata-deploy.sh
-    K3D_OPTS+=('-v' "$(dirname $(readlink -f ${0}))/kata-containers/shims/containerd-shim-kata-${i}-${SHIM_VERSION}:/usr/local/bin/containerd-shim-kata-${i}-${SHIM_VERSION}")
+    K3D_OPTS+=('-v' "${MYDIR}/kata-containers/shims/containerd-shim-kata-${i}-${SHIM_VERSION}:/usr/local/bin/containerd-shim-kata-${i}-${SHIM_VERSION}")
     cat <<EOF >> ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
 [plugins.cri.containerd.runtimes.kata-${i}]
   runtime_type = "io.containerd.kata-${i}.${SHIM_VERSION}"
@@ -189,96 +190,9 @@ launch_cluster_post(){
   PRIVILEGED_PSP=99-privileged
   RESTRICTED_PSP=01-restricted
   [ ${ALLOW_ALL_PSP} -eq 0 ] && DEFAULT_PSP=${PRIVILEGED_PSP} || DEFAULT_PSP=${RESTRICTED_PSP}
-  kubectl apply -f- <<EOF
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: ${PRIVILEGED_PSP}
-  annotations:
-    seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
-spec:
-  allowedCapabilities: ['*']
-  volumes: ['*']
-  hostNetwork: true
-  hostPorts:
-  - min: 0
-    max: 65535
-  hostIPC: true
-  hostPID: true
-  privileged: true
-  allowPrivilegeEscalation: true
-  runAsUser:
-    rule: 'RunAsAny'
-  seLinux:
-    rule: 'RunAsAny'
-  supplementalGroups:
-    rule: 'RunAsAny'
-  fsGroup:
-    rule: 'RunAsAny'
----
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: ${RESTRICTED_PSP}
-  annotations:
-    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
-    #apparmor.security.beta.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
-spec:
-  requiredDropCapabilities: ["ALL"]
-  forbiddenSysctls: ["*"]
-  volumes:
-  - configMap
-  - emptyDir
-  hostNetwork: false
-  hostPorts: []
-  hostIPC: false
-  hostPID: false
-  allowedHostPaths: []
-  readOnlyRootFilesystem: true
-  privileged: false
-  allowPrivilegeEscalation: false
-  defaultAllowPrivilegeEscalation: false
-  runAsUser:
-    rule: 'MustRunAsNonRoot'
-  seLinux:
-    rule: 'RunAsAny'
-  supplementalGroups:
-    rule: 'MustRunAs'
-    ranges:
-    - min: 1
-      max: 65535
-  fsGroup:
-    rule: 'MustRunAs'
-    ranges:
-    - min: 1
-      max: 65535
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: default-psp-cr
-rules:
-- apiGroups: ['extensions', 'policy']
-  resources: ['podsecuritypolicies']
-  resourceNames: ['${DEFAULT_PSP}']
-  verbs: ['use']
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: default-psp-crb
-roleRef:
-  kind: ClusterRole
-  name: default-psp-cr
-  apiGroup: rbac.authorization.k8s.io
-subjects:
-- kind: Group
-  apiGroup: rbac.authorization.k8s.io
-  name: system:serviceaccounts
-- kind: Group
-  apiGroup: rbac.authorization.k8s.io
-  name: system:authenticated
-EOF
+  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <${MYDIR}/manifests/priviledged-psp.yml.shtpl | kubectl apply -f-
+  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <${MYDIR}/manifests/restricted-psp.yml.shtpl | kubectl apply -f-
+  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <${MYDIR}/manifests/default-psp-crb.yml.shtpl | kubectl apply -f-
 
   [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && registry_proxy_post
 }
@@ -384,7 +298,7 @@ launch_cluster::kubedee(){
 
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
-  "$(dirname $(readlink -f ${0}))/kubedee/kubedee" --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} ${KUBEDEE_OPTS[@]} up ${CLUSTER_NAME}
+  "${MYDIR}/kubedee/kubedee" --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} ${KUBEDEE_OPTS[@]} up ${CLUSTER_NAME}
   launch_cluster_post
 }
 
@@ -404,65 +318,10 @@ launch_cluster(){
   launch_cluster::${K8S_RUNTIME}
 
   # Kata-post
-  [ ${INSTALL_KATA} -eq 0 ] && kubectl apply -f- <<EOF ||:
-apiVersion: node.k8s.io/v1beta1  # RuntimeClass is defined in the node.k8s.io API group
-kind: RuntimeClass
-metadata:
-  name: runc  # The name the RuntimeClass will be referenced by
-handler: runc  # The name of the corresponding CRI configuration
----
-apiVersion: node.k8s.io/v1beta1
-kind: RuntimeClass
-metadata:
-  name: kata-qemu
-handler: kata-qemu
----
-apiVersion: node.k8s.io/v1beta1
-kind: RuntimeClass
-metadata:
-  name: kata-fc
-handler: kata-fc
----
-apiVersion: node.k8s.io/v1beta1
-kind: RuntimeClass
-metadata:
-  name: kata-clh
-handler: kata-clh
-EOF
-
-  if [ "${K8S_RUNTIME}" = "k3d" ]; then
-    [ ${INSTALL_KATA} -eq 0 ] && kubectl apply -f- <<EOF ||:
-apiVersion: apps/v1
-kind: DaemonSet
-metadata:
-  namespace: kube-system
-  name: syslog
-spec:
-  selector:
-    matchLabels:
-      app: syslog
-  template:
-    metadata:
-      labels:
-        app: syslog
-    spec:
-      hostNetwork: true
-      containers:
-      - name: syslog
-        image: balabit/syslog-ng
-      - name: socat
-        image: alpine/socat
-        command: ["/bin/sh", "-c", "socat UDP:127.0.0.1:514,keepalive UNIX-LISTEN:/mnt/var/run/log,keepalive,mode=0666,fork"]
-        volumeMounts:
-        - mountPath: /mnt/var/run
-          name: host-var-run
-      volumes:
-      - name: host-var-run
-        hostPath:
-          path: /var/run
-EOF
-    [ ${INSTALL_KATA} -eq 0 ] && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
-  fi
+  [ ${INSTALL_KATA} -eq 0 ] && kubectl apply -f "${MYDIR}/manifests/kata-runtime-classes.yml" \
+    && [ "${K8S_RUNTIME}" = "k3d" ] \
+    && kubectl apply -f "${MYDIR}/manifests/k3d-syslogd.yml" \
+    && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
 }
 
 teardown_cluster::k3d(){
@@ -472,7 +331,7 @@ teardown_cluster::k3d(){
 }
 
 teardown_cluster::kubedee(){
-  "$(dirname $(readlink -f ${0}))/kubedee/kubedee" delete ${CLUSTER_NAME} ||:
+  "${MYDIR}/kubedee/kubedee" delete ${CLUSTER_NAME} ||:
 }
 
 install_dashboard(){
@@ -492,26 +351,7 @@ install_dashboard(){
       -e '/enable-insecure-login/d' | kubectl apply -f- \
     || (echo "Unsupported Kubelet version ${KUBELET_VERSION%.*}. No dashboard will be installed." && exit 0)
   
-  kubectl apply -f- <<EOF
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  labels:
-    k8s-app: kubernetes-dashboard
-  name: kubernetes-dashboard
-rules:
-- apiGroups:
-  - ""
-  - extensions
-  - apps
-  - batch
-  - apiextensions.k8s.io
-  - metrics.k8s.io
-  - rbac.authorization.k8s.io
-  - storage.k8s.io
-  resources: ["*"]
-  verbs: ["get", "list", "watch"]
-EOF
+  kubectl apply -f "${MYDIR}/manifests/k8s-dashboard-cr.yml"
 }
 
 # we could be installing through K3S' `helm.cattle.io/v1` API (like in github.com/mrchrd/k3s-quickstart), but we shouldn't be making such assumptions
@@ -540,26 +380,7 @@ setup_helm(){
 
 install_tiller(){
   echo "Installing Tiller…"
-  kubectl apply -f- <<EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${TILLER_SERVICE_ACCOUNT}
-  namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ${TILLER_SERVICE_ACCOUNT}-cluster-admin-crb
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: ${TILLER_SERVICE_ACCOUNT}
-  namespace: kube-system
-EOF
+  TILLER_SERVICE_ACCOUNT="${TILLER_SERVICE_ACCOUNT}" envsubst <${MYDIR}/manifests/tiller-cluster-admin.yml.shtpl | kubectl apply -f-
 
   helm init --upgrade --service-account ${TILLER_SERVICE_ACCOUNT}
   until kubectl -n kube-system wait --for condition=available deploy tiller-deploy; do sleep 1; done 2>/dev/null
@@ -570,96 +391,7 @@ install_service_mesh(){
   echo "Installing Istio Resources…"
 
   # secure Citadel Node Agent's SDS unix socket
-  kubectl apply -f- <<EOF
-# socket creation section
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: istio-nodeagent
-spec:
-  allowedHostPaths:
-  - pathPrefix: "/var/run/sds"
-  seLinux:
-    rule: RunAsAny
-  supplementalGroups:
-    rule: RunAsAny
-  runAsUser:
-    rule: RunAsAny
-  fsGroup:
-    rule: RunAsAny
-  volumes: ['*']
----
-kind: Role
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: istio-nodeagent
-  namespace: ${NAMESPACES_NETWORK}
-rules:
-- apiGroups: ['extensions', 'policy']
-  resources: ['podsecuritypolicies']
-  resourceNames: ['istio-nodeagent']
-  verbs: ['use']
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: istio-nodeagent
-  namespace: ${NAMESPACES_NETWORK}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: istio-nodeagent
-subjects:
-- kind: ServiceAccount
-  name: istio-nodeagent-service-account
-  namespace: ${NAMESPACES_NETWORK}
----
-# lockdown section
-apiVersion: policy/v1beta1
-kind: PodSecurityPolicy
-metadata:
-  name: istio-sds-uds
-spec:
- # Protect the unix domain socket from unauthorized modification
- allowedHostPaths:
- - pathPrefix: "/var/run/sds"
-   readOnly: true
- # Allow the istio sidecar injector to work
- allowedCapabilities:
- - NET_ADMIN
- seLinux:
-   rule: RunAsAny
- supplementalGroups:
-   rule: RunAsAny
- runAsUser:
-   rule: RunAsAny
- fsGroup:
-   rule: RunAsAny
- volumes: ['*']
----
-kind: ClusterRole
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: istio-sds-uds
-rules:
-- apiGroups: ['extensions', 'policy']
-  resources: ['podsecuritypolicies']
-  resourceNames: ['istio-sds-uds']
-  verbs: ['use']
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: istio-sds-uds
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: istio-sds-uds
-subjects:
-- apiGroup: rbac.authorization.k8s.io
-  kind: Group
-  name: system:serviceaccounts
-EOF
+  NAMESPACES_NETWORK="${NAMESPACES_NETWORK}" envsubst <${MYDIR}/manifests/istio-psp.yml.shtpl | kubectl apply -f-
 
   # be sure to prefix configuration configuration keys with `values.` when using `istioctl`
   #istioctl manifest apply --wait \
@@ -692,27 +424,7 @@ install_minio(){
 
 install_minio_client(){
   local MC_NAME="mc-${RANDOM}"
-  kubectl apply -f- <<EOF
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: ${MC_NAME}
-  namespace: ${NAMESPACES_STORAGE}
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: ${MC_NAME}
-  template:
-    metadata:
-      labels:
-        app: ${MC_NAME}
-    spec:
-      containers:
-      - name: mc
-        image: minio/mc
-        command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
-EOF
+  NAMESPACES_STORAGE="${NAMESPACES_STORAGE}" MC_NAME="${MC_NAME}" envsubst <${MYDIR}/manifests/minio-client-deploy.yml.shtpl | kubectl apply -f-
 
   until kubectl -n ${NAMESPACES_STORAGE} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
   kubectl -n ${NAMESPACES_STORAGE} exec $(kubectl -n ${NAMESPACES_STORAGE} get pods -o jsonpath="{.items[?(@.metadata.labels.app==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc "mc config host add minio http://${RELEASES_MINIO}.${NAMESPACES_STORAGE}.svc:${MINIO_SVC_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}"
@@ -735,48 +447,7 @@ install_openebs(){
     kubectl annotate sc ${i} storageclass.kubernetes.io/is-default-class-
   done
 
-  kubectl apply -f- <<EOF
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-provisioner: openebs.io/local
-volumeBindingMode: WaitForFirstConsumer
-reclaimPolicy: Delete
-metadata:
-  name: openebs-hostpath
-  annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-    openebs.io/cas-type: local
-    cas.openebs.io/config: |
-      #hostpath type will create a PV by 
-      # creating a sub-directory under the
-      # BASEPATH provided below.
-      - name: StorageType
-        value: "hostpath"
-      #Specify the location (directory) where
-      # where PV(volume) data will be saved. 
-      # A sub-directory with pv-name will be 
-      # created. When the volume is deleted, 
-      # the PV sub-directory will be deleted.
-      #Default value is /var/openebs/local
-      - name: BasePath
-        value: "/var/openebs/local/"
-#---
-#apiVersion: storage.k8s.io/v1
-#kind: StorageClass
-#provisioner: openebs.io/local
-#volumeBindingMode: WaitForFirstConsumer
-#reclaimPolicy: Delete
-#metadata:
-#  name: openebs-device
-#  annotations:
-#    openebs.io/cas-type: local
-#    cas.openebs.io/config: |
-#      #device type will create a PV by
-#      # issuing a BDC and will extract the path
-#      # values from the associated BD.
-#      - name: StorageType
-#        value: "device"
-EOF
+  kubectl apply -f "${MYDIR}/manifests/openebs-storage-classes.yml"
   HELMFILE_ARGS+=('-l' "name=${RELEASES_OPENEBS:=openebs}")
 }
 
@@ -784,45 +455,24 @@ install_prometheus_operator(){
   echo "Installing Prometheus Operator…"
   local RELEASES_PROMETHEUS_OPERATOR=${RELEASES_PROMETHEUS_OPERATOR:=prometheus-operator}
   : ${THANOS_OBJSTORE_CONFIG_SECRET:=thanos-objstore-config}
+
+  # has to be object-store.yaml due to hard-coding of the filename in banzaicloud/thanos chart's secret.yaml template
   : ${THANOS_OBJSTORE_CONFIG_FILENAME:=object-store.yaml}
 
-  kubectl apply -f- <<EOF
-apiVersion: v1
-kind: Secret
-metadata:
-  name: ${THANOS_OBJSTORE_CONFIG_SECRET}
-  namespace: ${NAMESPACES_MONITORING}
-stringData:
-  # ref: https://github.com/thanos-io/thanos/blob/master/docs/storage.md
-  # has to be object-store.yaml due to hard-coding of the filename in banzaicloud/thanos chart's secret.yaml template
-  ${THANOS_OBJSTORE_CONFIG_FILENAME}: |
-    type: S3
-    config:
-      bucket: "${MINIO_DEFAULT_BUCKET}"
-      endpoint: "${RELEASES_MINIO}.${NAMESPACES_STORAGE}.svc:${MINIO_SVC_PORT}"
-      access_key: "${MINIO_ACCESS_KEY}"
-      secret_key: "${MINIO_SECRET_KEY}"
-      insecure: true
-      signature_version2: true
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ${RELEASES_PROMETHEUS_OPERATOR}-thanos
-  namespace: ${NAMESPACES_MONITORING}
-spec:
-  type: ClusterIP
-  clusterIP: None
-  ports:
-  - name: grpc
-    port: 10901
-    targetPort: grpc
-  - name: http
-    port: 10902
-    targetPort: http
-  selector:
-    prometheus: self
-EOF
+  NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
+  NAMESPACES_STORAGE="${NAMESPACES_STORAGE}" \
+  THANOS_OBJSTORE_CONFIG_SECRET="${THANOS_OBJSTORE_CONFIG_SECRET}" \
+  THANOS_OBJSTORE_CONFIG_FILENAME="${THANOS_OBJSTORE_CONFIG_FILENAME}" \
+  RELEASES_MINIO="${RELEASES_MINIO}" \
+  MINIO_DEFAULT_BUCKET="${MINIO_DEFAULT_BUCKET}" \
+  MINIO_SVC_PORT="${MINIO_SVC_PORT}" \
+  MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" \
+  MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
+  envsubst <${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl | kubectl apply -f-
+
+  NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
+  RELEASES_PROMETHEUS_OPERATOR="${RELEASES_PROMETHEUS_OPERATOR}" \
+  envsubst <${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl | kubectl apply -f-
 
   HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_THANOS:=thanos}"
@@ -887,18 +537,11 @@ kube_up(){
   [ ${INSTALL_SERVERLESS} -eq 0 ] && install_serverless
 
   # apply helm releases
-  helmfile --no-color --allow-no-matching-release -f "$(dirname $(readlink -f ${0}))/helmfile.yaml" ${HELMFILE_ARGS[@]} sync
+  helmfile --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" ${HELMFILE_ARGS[@]} sync
 
   [ ${INSTALL_STORAGE} -eq 0 ] && install_minio_client
   [ ${INSTALL_SERVICE_MESH} -eq 0 ] && [ ${ISTIO_SIDECAR_AUTOINJECT:=0} -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled \
-    && kubectl apply -f- <<EOF ||:
-apiVersion: certmanager.k8s.io/v1alpha1
-kind: ClusterIssuer
-metadata:
-  name: selfsigned
-spec:
-  selfSigned: {}
-EOF
+    && kubectl apply -f "${MYDIR}/manifests/selfsigned-certmanager.yml" ||:
 
   show_ingress_points
   echo "Now run \"kubectl proxy\" and go to http://127.0.0.1:8001/api/v1/namespaces/kubernetes-dashboard/services/http%3Akubernetes-dashboard%3A/proxy/ for your K8S dashboard."

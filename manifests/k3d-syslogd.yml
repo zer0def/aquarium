@@ -1,0 +1,29 @@
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  namespace: kube-system
+  name: syslog
+spec:
+  selector:
+    matchLabels:
+      app: syslog
+  template:
+    metadata:
+      labels:
+        app: syslog
+    spec:
+      hostNetwork: true
+      containers:
+      - name: syslog
+        image: balabit/syslog-ng
+      - name: socat
+        image: alpine/socat
+        command: ["/bin/sh", "-c", "socat UDP:127.0.0.1:514,keepalive UNIX-LISTEN:/mnt/var/run/log,keepalive,mode=0666,fork"]
+        volumeMounts:
+        - mountPath: /mnt/var/run
+          name: host-var-run
+      volumes:
+      - name: host-var-run
+        hostPath:
+          path: /var/run

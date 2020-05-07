@@ -1,0 +1,37 @@
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: ${RESTRICTED_PSP}
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
+    #apparmor.security.beta.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
+spec:
+  requiredDropCapabilities: ["ALL"]
+  forbiddenSysctls: ["*"]
+  volumes:
+  - configMap
+  - emptyDir
+  hostNetwork: false
+  hostPorts: []
+  hostIPC: false
+  hostPID: false
+  allowedHostPaths: []
+  readOnlyRootFilesystem: true
+  privileged: false
+  allowPrivilegeEscalation: false
+  defaultAllowPrivilegeEscalation: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1
+      max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1
+      max: 65535

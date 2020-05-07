@@ -1,0 +1,18 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ${RELEASES_PROMETHEUS_OPERATOR}-thanos
+  namespace: ${NAMESPACES_MONITORING}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: grpc
+    port: 10901
+    targetPort: grpc
+  - name: http
+    port: 10902
+    targetPort: http
+  selector:
+    prometheus: self
