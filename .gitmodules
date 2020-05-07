@@ -6,3 +6,6 @@
 	path = istio
 	url = https://github.com/istio/istio
 	branch = release-1.5
+[submodule "kubedee"]
+	path = kubedee
+	url = https://github.com/zer0def/kubedee

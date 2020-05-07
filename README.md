@@ -12,14 +12,27 @@ aquarium - Linux-centric scaffold for local K8S development
 Usage: aquarium.sh [options] <up|down>
 
 Options:
-  --no-*                              disable installation of selected component
-                                      (choice from: kata, registry-proxy, monitoring, serverless, service-mesh, storage)
+  --no-*, --with-*                    disable/enable installation of selected
+                                      component (choice from: kata,
+                                        registry-proxy, monitoring, serverless,
+                                        service-mesh, storage, local-registry)
                                       (env: non-zero value on INSTALL_*)
-  -N <name>, --name <name>            cluster name (default: k3s-default, env: CLUSTER_NAME)
-  -n <num>, --num <num>               number of workers (default: nproc/4, env: NUM_WORKERS)
-  -r <runtime>, --runtime <runtime>   runtime choice (default: k3d, env: K8S_RUNTIME)
+  -N <name>, --name <name>            cluster name
+                                      (default: k3s-default, env: CLUSTER_NAME)
+  -n <num>, --num <num>               number of workers
+                                      (default: nproc/4, env: NUM_WORKERS)
+  -r <runtime>, --runtime <runtime>   runtime choice
+                                      (default: k3d, env: K8S_RUNTIME)
                                       (choice of: k3d, kubedee)
   -t <tag>, --tag <tag>               runtime version (env: RUNTIME_TAG)
+
+Environment variables:
+
+  Registry proxy (ref: https://github.com/rpardini/docker-registry-proxy#usage):
+    PROXY_REGISTRIES    space-delimited string listing registry domains to cache
+                        OCI image layers from
+    AUTH_REGISTRIES     space-delimited string listing "domain:username:password"
+                        information for the proxy to authenticate to registries
 ```
 
 ### Project status

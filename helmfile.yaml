@@ -246,9 +246,19 @@ releases:
       #repository: registry.opensource.zalan.do/acid/spilo-11
       #tag: 1.6-p1
       repository: registry.opensource.zalan.do/acid/spilo-12
-      tag: 1.6-p2
+      tag: 1.6-p3
     persistentVolume:
       size: 10G
+    patroniConfiguration:
+      bootstrap:
+        dcs:
+          synchronous_mode: true
+          # chokes on init, because there's no synchronous standby to post-init with
+          #synchronous_mode_strict: true
+        initdb:
+        - data-checksums
+      watchdog:
+        mode: off
 - name: {{ $releases.redis }}
   namespace: {{ $namespaces.storage }}
   chart: stable/redis-ha

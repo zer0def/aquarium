@@ -19,6 +19,7 @@ KUBE_NOPROXY_SETTING=(
 )
 
 K3D_OPTS=()
+KUBEDEE_OPTS=()
 K3D_LIB_MOUNTS_ALL=()
 
 string_join() { local IFS="$1"; shift; echo "$*"; }
@@ -383,18 +384,20 @@ launch_cluster::kubedee(){
 
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
-  kubedee --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} up ${CLUSTER_NAME}
+  "$(dirname $(readlink -f ${0}))/kubedee/kubedee" --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} ${KUBEDEE_OPTS[@]} up ${CLUSTER_NAME}
   launch_cluster_post
 }
 
 launch_cluster(){
-  [ ${K8S_RUNTIME} = "k3d" ] && mkdir -p ${CLUSTER_CONFIG_HOST_PATH}/ssl \
-  && [ ${USE_LOCAL_REGISTRY:=0} -eq 0 ] && K3D_OPTS+=(
+  [ ${K8S_RUNTIME} = "k3d" ] && mkdir -p ${CLUSTER_CONFIG_HOST_PATH}/ssl
+  [ ${INSTALL_LOCAL_REGISTRY:=1} -eq 0 ] && K3D_OPTS+=(
     '--registry-name' "${LOCAL_REGISTRY_HOST:=registry.local}"
     '--registry-port' "${LOCAL_REGISTRY_PORT:=5000}"
     '--enable-registry'
     #'--registry-volume' 'k3d-registry' '--enable-registry-cache'
-  ) && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
+  ) && KUBEDEE_OPTS+=('--enable-insecure-registry') \
+  && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
+
   [ ${INSTALL_KATA} -eq 0 ] && kata_pre
   [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && registry_proxy_pre
 
@@ -469,7 +472,7 @@ teardown_cluster::k3d(){
 }
 
 teardown_cluster::kubedee(){
-  kubedee delete ${CLUSTER_NAME} ||:
+  "$(dirname $(readlink -f ${0}))/kubedee/kubedee" delete ${CLUSTER_NAME} ||:
 }
 
 install_dashboard(){
@@ -919,14 +922,27 @@ ${MYNAME%.*} - Linux-centric scaffold for K8S development
 Usage: ${0} [options] <up|down>
 
 Options:
-  --no-*                              disable installation of selected component
-                                      (choice from: kata, registry-proxy, monitoring, serverless, service-mesh, storage)
+  --no-*, --with-*                    disable/enable installation of selected
+                                      component (choice from: kata,
+                                        registry-proxy, monitoring, serverless,
+                                        service-mesh, storage, local-registry)
                                       (env: non-zero value on INSTALL_*)
-  -N <name>, --name <name>            cluster name (default: k3s-default, env: CLUSTER_NAME)
-  -n <num>, --num <num>               number of workers (default: nproc/4, env: NUM_WORKERS)
-  -r <runtime>, --runtime <runtime>   runtime choice (default: k3d, env: K8S_RUNTIME)
+  -N <name>, --name <name>            cluster name
+                                      (default: k3s-default, env: CLUSTER_NAME)
+  -n <num>, --num <num>               number of workers
+                                      (default: nproc/4, env: NUM_WORKERS)
+  -r <runtime>, --runtime <runtime>   runtime choice
+                                      (default: k3d, env: K8S_RUNTIME)
                                       (choice of: k3d, kubedee)
   -t <tag>, --tag <tag>               runtime version (env: RUNTIME_TAG)
+
+Environment variables:
+
+  Registry proxy (ref: https://github.com/rpardini/docker-registry-proxy#usage ):
+    PROXY_REGISTRIES    space-delimited string listing registry domains to cache
+                        OCI image layers from
+    AUTH_REGISTRIES     space-delimited string listing "domain:username:password"
+                        information for the proxy to authenticate to registries
 EOF
   exit 1
 }
@@ -950,6 +966,12 @@ main(){
         COMPONENT=${1/--no-/}
         COMPONENT=${COMPONENT//-/_}
         declare INSTALL_${COMPONENT^^}=1
+        shift
+        ;;
+      --with-*)
+        COMPONENT=${1/--with-/}
+        COMPONENT=${COMPONENT//-/_}
+        declare INSTALL_${COMPONENT^^}=0
         shift
         ;;
       -N | --name)
@@ -1010,7 +1032,7 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.17.4-k3s1}"
+    [k3d]="${RUNTIME_TAG:-1.18.2-k3s1}"
     [kubedee]="${RUNTIME_TAG:-1.18.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
