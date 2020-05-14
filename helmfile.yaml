@@ -4,7 +4,7 @@
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
 {{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istioInit" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "istioPrometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_PROMETHEUS_OPERATOR")) "istio" (default "istio" (env "RELEASES_ISTIO")) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "prometheusOperator" (default "prometheus-operator" (env "RELEASES_PROMETHEUS_OPERATOR")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
-{{- $versions := dict "certManager" (default "0.11.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "1.10.2" (env "VERSIONS_HARBOR")) "istio" (default "1.5.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.17.0" (env "VERSIONS_JAEGER")) "openebs" (default "1.9.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.4.9" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
+{{- $versions := dict "certManager" (default "0.11.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "1.10.2" (env "VERSIONS_HARBOR")) "istio" (default "1.5.4" (env "VERSIONS_ISTIO")) "jaeger" (default "1.17.0" (env "VERSIONS_JAEGER")) "openebs" (default "1.10.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.5.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
 {{- $istioMajor := slice (splitList "." $versions.istio) 0 2 | join "." -}}
 
 {{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "coreDbName" (default "harbor_core" (env "HARBOR_CORE_DB_NAME")) "clairDbName" (default "harbor_clair" (env "HARBOR_CLAIR_DB_NAME")) "notaryServerDbName" (default "harbor_notary_server" (env "HARBOR_NOTARY_SERVER_DB_NAME")) "notarySignerDbName" (default "harbor_notary_signer" (env "HARBOR_NOTARY_SIGNER_DB_NAME")) "dbUser" (default "harbor" (env "HARBOR_DB_USER")) "dbPass" (default "harbor" (env "HARBOR_DB_PASS")) -}}
@@ -153,6 +153,8 @@ releases:
   chart: stable/openebs
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
   - fullnameOverride: {{ $releases.openebs | quote }}
+    image:  # hopefully a temporary state of affairs
+      repository: docker.io/
     analytics:
       enabled: false
     release:
@@ -196,9 +198,9 @@ releases:
       monitoring:
         imageTag: {{ $versions.openebs }}
     ndmOperator:
-      imageTag: v{{ $versions.openebsNdm }}
+      imageTag: {{ $versions.openebsNdm }}
     ndm:
-      imageTag: v{{ $versions.openebsNdm }}
+      imageTag: {{ $versions.openebsNdm }}
       filters:
         excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}"
         includePaths: "/dev/loop"
@@ -243,22 +245,16 @@ releases:
     env:
       ALLOW_NOSSL: "true"
     image:
+      #repository: registry.opensource.zalan.do/acid/spilo-10
+      #tag: 1.5-p5
       #repository: registry.opensource.zalan.do/acid/spilo-11
       #tag: 1.6-p1
       repository: registry.opensource.zalan.do/acid/spilo-12
       tag: 1.6-p3
-    persistentVolume:
-      size: 10G
-    patroniConfiguration:
+    spiloConfiguration:
       bootstrap:
-        dcs:
-          synchronous_mode: true
-          # chokes on init, because there's no synchronous standby to post-init with
-          #synchronous_mode_strict: true
         initdb:
         - data-checksums
-      watchdog:
-        mode: off
 - name: {{ $releases.redis }}
   namespace: {{ $namespaces.storage }}
   chart: stable/redis-ha
@@ -324,6 +320,7 @@ releases:
         clairDatabase: {{ $harbor.clairDbName | quote }}
         notaryServerDatabase: {{ $harbor.notaryServerDbName | quote }}
         notarySignerDatabase: {{ $harbor.notarySignerDbName | quote }}
+        #sslmode: require
     redis:
       type: external
       external:
