@@ -1,11 +1,8 @@
-{{/* KUBECONFIG=$(k3d get-kubeconfig) helmfile --no-color --allow-no-matching-release -f k3d-helmfile.yaml -l name!=kubeless sync */}}
-
 {{- $helmTimeout := default 86400 (env "HELM_TIMEOUT") -}}
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
-{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istioInit" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "istioPrometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_PROMETHEUS_OPERATOR")) "istio" (default "istio" (env "RELEASES_ISTIO")) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "prometheusOperator" (default "prometheus-operator" (env "RELEASES_PROMETHEUS_OPERATOR")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
-{{- $versions := dict "certManager" (default "0.11.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "1.10.2" (env "VERSIONS_HARBOR")) "istio" (default "1.5.4" (env "VERSIONS_ISTIO")) "jaeger" (default "1.17.0" (env "VERSIONS_JAEGER")) "openebs" (default "1.10.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.5.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
-{{- $istioMajor := slice (splitList "." $versions.istio) 0 2 | join "." -}}
+{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "prometheusOperator" (default "prometheus-operator" (env "RELEASES_PROMETHEUS_OPERATOR")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
+{{- $versions := dict "certManager" (default "0.15.1" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "1.10.2" (env "VERSIONS_HARBOR")) "istio" (default "1.6.0" (env "VERSIONS_ISTIO")) "jaeger" (default "1.17.0" (env "VERSIONS_JAEGER")) "openebs" (default "1.10.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.5.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
 
 {{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "coreDbName" (default "harbor_core" (env "HARBOR_CORE_DB_NAME")) "clairDbName" (default "harbor_clair" (env "HARBOR_CLAIR_DB_NAME")) "notaryServerDbName" (default "harbor_notary_server" (env "HARBOR_NOTARY_SERVER_DB_NAME")) "notarySignerDbName" (default "harbor_notary_signer" (env "HARBOR_NOTARY_SIGNER_DB_NAME")) "dbUser" (default "harbor" (env "HARBOR_DB_USER")) "dbPass" (default "harbor" (env "HARBOR_DB_PASS")) -}}
 {{- $minio := dict "accessKey" (default "AKIAIOSFODNN7EXAMPLE" (env "MINIO_ACCESS_KEY")) "secretKey" (default "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" (env "MINIO_SECRET_KEY")) "servicePort" (default 9000 (env "MINIO_SVC_PORT")) "defaultBucket" (default "minio-bucket" (env "MINIO_DEFAULT_BUCKET")) -}}
@@ -23,10 +20,6 @@ repositories:
   url: https://kubernetes-charts.storage.googleapis.com
 - name: incubator
   url: https://kubernetes-charts-incubator.storage.googleapis.com
-#- name: jetstack  # cert-manager
-#  url: https://charts.jetstack.io
-- name: istio{{ $istioMajor }}
-  url: https://storage.googleapis.com/istio-release/releases/{{ $versions.istio }}/charts
 - name: banzaicloud  # thanos, src: https://github.com/banzaicloud/banzai-charts
   url: https://kubernetes-charts.banzaicloud.com
 - name: jaegertracing  # jaeger, src: https://github.com/jaegertracing/helm-charts
@@ -35,20 +28,91 @@ repositories:
 #  url: https://openebs.github.io/charts
 - name: harbor  # harbor, src: https://github.com/goharbor/harbor-helm
   url: https://helm.goharbor.io
+- name: nginx  # ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
+  url: https://helm.nginx.com/stable
+- name: jetstack  # cert-manager
+  url: https://charts.jetstack.io
+- name: rancher
+  url: https://releases.rancher.com/server-charts/latest
+- name: rook
+  url: https://charts.rook.io/release
+{{- if semverCompare "<1.6" $versions.istio }}
+- name: istio
+  url: https://storage.googleapis.com/istio-release/releases/{{ $versions.istio }}/charts
+{{- end }}
 
 helmDefaults:
   wait: true
   timeout: {{ $helmTimeout }}
   tillerless: false
 
+templates:
+  istio:
+    values:
+    - global: &istioGlobal
+        hub: docker.io/istio
+        tag: {{ $versions.istio }}
+        istioNamespace: {{ $namespaces.network }}
+        telemetryNamespace: {{ $namespaces.network }}
+        prometheusNamespace: {{ $namespaces.network }}
+        policyNamespace: {{ $namespaces.network }}
+        configRootNamespace: {{ $namespaces.network }}
+        meshExpansion:
+          enabled: true
+      control: &istioControl
+        disablePolicyChecks: false
+        mtls:
+          enabled: true
+        outboundTrafficPolicy:
+          mode: ALLOW_ANY
+        proxy:
+          accessLogFile: /dev/stdout
+        sds:
+          enabled: true
+          udsPath: "unix:/var/run/sds/uds_path"
+      gateways:
+        istio-ingressgateway: &istioIngress
+          type: NodePort
+        istio-egressgateway: &istioEgress
+          type: NodePort
+    - &istioOldCertManager
+      certmanager:
+        enabled: true
+    - &istioKiali
+      kiali:
+        enabled: true
+        createDemoSecret: true
+        dashboard:
+          grafanaURL: "http://grafana.{{ $namespaces.network }}.svc:3000"
+          jaegerURL: "http://{{ $releases.jaegerOperator }}-jaeger-query.{{ $namespaces.network }}.svc:16686"
+    - &istioMixer
+      mixer:
+        # istio-policy
+        policy:
+          enabled: true
+        # istio-telemetry/mixer-telemetry
+        adapters:
+          stdio:
+            enabled: true
+        telemetry:
+          enabled: true
+  harbor:
+    values:
+    - component: &harborVersion
+        image:
+          tag: v{{ $versions.harbor }}
+  openebs:
+    values:
+    - disabledComponent: &openebsLVP
+        enabled: false
+        replicas: 0
+      openebsTag: &openebsTag
+        imageTag: {{ $versions.openebs }}
+      openebsNdmTag: &openebsNdmTag
+        imageTag: {{ $versions.openebsNdm }}
+
 releases:
 # network components
-- name: {{ $releases.istioInit }}
-  namespace: {{ $namespaces.network }}
-  chart: istio{{ $istioMajor }}/istio-init
-  values:
-  - certmanager:
-      enabled: true
 - name: {{ $releases.jaegerOperator }}
   namespace: {{ $namespaces.network }}
   chart: jaegertracing/jaeger-operator
@@ -65,87 +129,137 @@ releases:
     # https://github.com/jaegertracing/jaeger-operator/issues/791
     rbac:
       clusterRole: true
-- name: {{ $releases.istio }}
+{{- if semverCompare "<1.6" $versions.istio }}
+- name: {{ $releases.istio.init }}
   namespace: {{ $namespaces.network }}
-  chart: istio{{ $istioMajor }}/istio
+  chart: istio/istio-init
+  values:
+  - *istioOldCertManager
+- name: {{ $releases.istio.old }}
+  namespace: {{ $namespaces.network }}
+  chart: istio/istio
   needs:
-  - {{ $namespaces.network }}/{{ $releases.istioInit }}
+  - {{ $namespaces.network }}/{{ $releases.istio.init }}
   - {{ $namespaces.network }}/{{ $releases.jaegerOperator }}
   hooks:
   - events: ["presync"]
     command: "/bin/sh"
     args: ["-xec", "kubectl -n {{ $namespaces.network }} wait --for condition=complete --timeout {{ $helmTimeout }}s job --all"]
   values:
-  - fullnameOverride: {{ $releases.istio | quote }}
+  - fullnameOverride: {{ $releases.istio.old | quote }}
     global:
-      tag: {{ $versions.istio }}
-      disablePolicyChecks: false
-      mtls:
-        enabled: true
-      outboundTrafficPolicy:
-        mode: ALLOW_ANY
-      proxy:
-        accessLogFile: /dev/stdout
-      sds:
-        enabled: true
-        udsPath: "unix:/var/run/sds/uds_path"
-      #k8sIngress:
-      #  enabled: true
-      #  enableHttps: true
-      #  gatewayName: ingressgateway
-    certmanager:
-      enabled: true
+      <<: *istioGlobal
+      <<: *istioControl
+    <<: *istioOldCertManager
+    <<: *istioKiali
+    <<: *istioMixer
     gateways:
       istio-ingressgateway:
-        type: NodePort
+        <<: *istioIngress
         sds:
           enabled: true
       istio-egressgateway:
-        type: NodePort
+        <<: *istioEgress
         enabled: true
-    grafana:
-      enabled: true
-    kiali:
-      enabled: true
-      createDemoSecret: true
-      dashboard:
-        grafanaURL: "http://grafana.{{ $namespaces.network }}.svc:3000"
-        jaegerURL: "http://{{ $releases.jaegerOperator }}-jaeger-query.{{ $namespaces.network }}.svc:16686"
-    mixer:
-      adapters:
-        stdio:
-          enabled: true
-      policy:
-        enabled: true
-      telemetry:
-        enabled: true
-    nodeagent:
+    # === removed in 1.6 ===
+    nodeagent:  # part of istio-proxy
       enabled: true
       env:
         CA_PROVIDER: Citadel
         CA_ADDR: "istio-citadel.{{ $namespaces.network }}.svc:8060"
         VALID_TOKEN: true
-    #prometheus:
-    #  enabled: false
-    security:
+    security:  # citadel is part of istio-pilot
       citadelHealthCheck: true
-    sidecarInjectorWebhook:
+    sidecarInjectorWebhook:  # part of control plane (istiod)
       enabled: true
-    #tracing:
-    #  enabled: true
-    #  #provider: zipkin
-
+{{- else }}
+- name: {{ $releases.istio.base }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/base
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+- name: {{ $releases.istio.control }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/istio-control/istio-discovery
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.base }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+      <<: *istioControl
+- name: {{ $releases.istio.gateway.egress }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/gateways/istio-egress
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+    gateways:
+      istio-egressgateway:
+        <<: *istioEgress
+- name: {{ $releases.istio.gateway.ingress }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/gateways/istio-ingress
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+    gateways:
+      istio-ingressgateway:
+        <<: *istioIngress
+- name: {{ $releases.istio.policy }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/istio-policy
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+    <<: *istioMixer
+- name: {{ $releases.istio.telemetry.grafana }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/istio-telemetry/grafana
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+- name: {{ $releases.istio.telemetry.kiali }}
+  namespace: {{ $namespaces.network }}
+  chart: ./istio/manifests/charts/istio-telemetry/kiali
+  needs:
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+  values:
+  - ./istio/manifests/charts/global.yaml
+  - global:
+      <<: *istioGlobal
+    <<: *istioKiali
+{{- end }}
 # https://github.com/coreos/prometheus-operator/issues/2502
 # https://github.com/istio/installer/pull/71
-- name: {{ $releases.istioPrometheusOperator }}
+- name: {{ $releases.istio.telemetry.prometheusOperator }}
   namespace: {{ $namespaces.network }}
-  chart: ./istio/manifests/istio-telemetry/prometheus-operator
+  chart: ./istio/manifests/charts/istio-telemetry/prometheusOperator
   needs:
   - {{ $namespaces.monitoring }}/{{ $releases.prometheusOperator }}
-  - {{ $namespaces.network }}/{{ $releases.istio }}
+{{- if semverCompare "<1.6" $versions.istio }}
+  - {{ $namespaces.network }}/{{ $releases.istio.old }}
+{{- else }}
+  - {{ $namespaces.network }}/{{ $releases.istio.control }}
+{{- end }}
   values:
+  - ./istio/manifests/charts/global.yaml
   - global:
-      telemetryNamespace: {{ $namespaces.network }}
+      <<: *istioGlobal
 
 # storage components
 - name: {{ $releases.openebs }}
@@ -160,47 +274,43 @@ releases:
     release:
       version: {{ $versions.openebs }}
     apiserver:  # not needed for just local PV
-      enabled: false
-      replicas: 0
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsLVP
+      <<: *openebsTag
     provisioner:  # not needed for just local PV
-      enabled: false
-      replicas: 0
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsLVP
+      <<: *openebsTag
     localprovisioner:
       enabled: true
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsTag
     snapshotOperator:  # not needed for just local PV
-      enabled: false
-      replicas: 0
+      <<: *openebsLVP
       controller:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
       provisioner:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
     webhook:  # not needed for just local PV
-      enabled: false
-      replicas: 0
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsLVP
+      <<: *openebsTag
     jiva:
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsTag
     cstor:
       pool:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
       poolMgmt:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
       target:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
       volumeMgmt:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
     helper:
-      imageTag: {{ $versions.openebs }}
+      <<: *openebsTag
     policies:
       monitoring:
-        imageTag: {{ $versions.openebs }}
+        <<: *openebsTag
     ndmOperator:
-      imageTag: {{ $versions.openebsNdm }}
+      <<: *openebsNdmTag
     ndm:
-      imageTag: {{ $versions.openebsNdm }}
+      <<: *openebsNdmTag
       filters:
         excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}"
         includePaths: "/dev/loop"
@@ -327,45 +437,33 @@ releases:
         host: {{ $releases.redis }}-haproxy.{{ $namespaces.storage }}.svc
         #password: {{ $redisPassword | quote }}
     nginx:
-      image:
-        tag: v{{ $versions.harbor }}
+      <<: *harborVersion
     portal:
-      image:
-        tag: v{{ $versions.harbor }}
+      <<: *harborVersion
     core:
-      image:
-        tag: v{{ $versions.harbor }}
+      <<: *harborVersion
     jobservice:
+      <<: *harborVersion
       jobLogger: database
-      image:
-        tag: v{{ $versions.harbor }}
     registry:
       registry:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
       controller:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
     chartmuseum:
-      image:
-        tag: v{{ $versions.harbor }}
+      <<: *harborVersion
     clair:
       clair:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
       adapter:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
     trivy:
-      image:
-        tag: v{{ $versions.harbor }}
+      <<: *harborVersion
     notary:
       server:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
       signer:
-        image:
-          tag: v{{ $versions.harbor }}
+        <<: *harborVersion
 
 # monitoring
 - name: {{ $releases.thanos }}

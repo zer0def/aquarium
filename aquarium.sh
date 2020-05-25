@@ -206,6 +206,10 @@ check_zfs(){
 
 launch_cluster::k3d(){
   [ ${INSTALL_STORAGE} -eq 0 ] && K3D_OPTS+=('--server-arg' '--disable=local-storage')
+  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && K3D_OPTS+=(
+    '--server-arg' '--disable=traefik'
+    '--server-arg' '--disable=servicelb'
+  )
 
   # base containerd config
   cat <<EOF > ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
@@ -402,12 +406,16 @@ install_service_mesh(){
 
   HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_ISTIO_INIT:=istio-init}"
-    '-l' "name=${RELEASES_JAEGER_OPERATOR:=jaeger-operator}"
     '-l' "name=${RELEASES_ISTIO:=istio}"
-  )
-  K3D_OPTS+=(
-    "--server-arg '--disable=traefik'"
-    "--server-arg '--disable=servicelb'"
+    '-l' "name=${RELEASES_JAEGER_OPERATOR:=jaeger-operator}"
+    '-l' "name=${RELEASES_ISTIO_BASE:=istio-base}"
+    '-l' "name=${RELEASES_ISTIO_CONTROL:=istio-control}"
+    '-l' "name=${RELEASES_ISTIO_GATEWAY_EGRESS:=istio-egress}"
+    '-l' "name=${RELEASES_ISTIO_GATEWAY_INGRESS:=istio-ingress}"
+    '-l' "name=${RELEASES_ISTIO_POLICY:=istio-policy}"
+    '-l' "name=${RELEASES_ISTIO_TELEMETRY_KIALI:=istio-kiali}"
+    '-l' "name=${RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR:=istio-prometheus-operator}"
+    '-l' "name=${RELEASES_ISTIO_TELEMETRY_TRACING:=istio-tracing}"
   )
 }
 
@@ -472,7 +480,7 @@ install_prometheus_operator(){
 
   NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
   RELEASES_PROMETHEUS_OPERATOR="${RELEASES_PROMETHEUS_OPERATOR}" \
-  envsubst <${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl | kubectl apply -f-
+  envsubst <${MYDIR}/manifests/thanos-prometheus-query-svc.yml.shtpl | kubectl apply -f-
 
   HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_THANOS:=thanos}"
@@ -540,8 +548,8 @@ kube_up(){
   helmfile --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" ${HELMFILE_ARGS[@]} sync
 
   [ ${INSTALL_STORAGE} -eq 0 ] && install_minio_client
-  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && [ ${ISTIO_SIDECAR_AUTOINJECT:=0} -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled \
-    && kubectl apply -f "${MYDIR}/manifests/selfsigned-certmanager.yml" ||:
+  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && [ ${ISTIO_SIDECAR_AUTOINJECT:=0} -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled ||:
+    #&& kubectl apply -f "${MYDIR}/manifests/selfsigned-certmanager.yml" ||:
 
   show_ingress_points
   echo "Now run \"kubectl proxy\" and go to http://127.0.0.1:8001/api/v1/namespaces/kubernetes-dashboard/services/http%3Akubernetes-dashboard%3A/proxy/ for your K8S dashboard."
@@ -676,7 +684,7 @@ main(){
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
     [k3d]="${RUNTIME_TAG:-1.18.2-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.18.2}"
+    [kubedee]="${RUNTIME_TAG:-1.18.3}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
