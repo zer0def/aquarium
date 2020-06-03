@@ -49,7 +49,7 @@ Other solutions targeted for Kubernetes development (taking Minikube & friends a
 
 Even with constant various improvements in upstream projects, over the years there has been a number of barely-addressed crippling corner cases, solutions to some of which have rotten away in experimental branches before eventually getting upstreamed after everyone has abandoned them by virtue of not wanting to endlessly fight the tools they need.
 
-#### Emulate your target environment without development/cloud-specific cruft
+#### Emulate your target environment without development/provider-specific cruft
 
 There's also an issue of developing (and, perhaps more importantly, adequately testing) Kubernetes manifests for things like solution resilience or scalability, which you cannot properly do on a single-node environment without making development-specific additions/exceptions to your manifests. This allows you to focus on your goal, not how to make it work within artificial constraints, most of the time.
 

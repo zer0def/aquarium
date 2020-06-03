@@ -39,7 +39,7 @@ create_volumes(){
   local VOLUME_NAME
   for i in $(seq 0 ${NUM_WORKERS}); do
     [ ${i} -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
-    docker volume create -d ${DOCKER_VOLUME_DRIVER} ${VOLUME_NAME} -o sparse=true -o fs=ext4 -o size=10GiB &>/dev/null
+    docker volume create -d ${DOCKER_VOLUME_DRIVER} ${VOLUME_NAME} -o sparse=true -o fs=ext4 -o size=20GiB &>/dev/null
     K3D_OPTS+=('-v' "${VOLUME_NAME}:/var/lib/rancher/k3s@${VOLUME_NAME}")
     if [ ${OLD_K3S} -ne 0 ]; then
       docker volume create \
@@ -303,6 +303,7 @@ launch_cluster::kubedee(){
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
   "${MYDIR}/kubedee/kubedee" --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} ${KUBEDEE_OPTS[@]} up ${CLUSTER_NAME}
+
   launch_cluster_post
 }
 
@@ -430,16 +431,6 @@ install_minio(){
   HELMFILE_ARGS+=('-l' "name=${RELEASES_MINIO:=minio}")
 }
 
-install_minio_client(){
-  local MC_NAME="mc-${RANDOM}"
-  NAMESPACES_STORAGE="${NAMESPACES_STORAGE}" MC_NAME="${MC_NAME}" envsubst <${MYDIR}/manifests/minio-client-deploy.yml.shtpl | kubectl apply -f-
-
-  until kubectl -n ${NAMESPACES_STORAGE} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-  kubectl -n ${NAMESPACES_STORAGE} exec $(kubectl -n ${NAMESPACES_STORAGE} get pods -o jsonpath="{.items[?(@.metadata.labels.app==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc "mc config host add minio http://${RELEASES_MINIO}.${NAMESPACES_STORAGE}.svc:${MINIO_SVC_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY}"
-
-  echo "MinIO is available under http://${RELEASES_MINIO}.${NAMESPACES_STORAGE}.svc:${MINIO_SVC_PORT} with access key \"${MINIO_ACCESS_KEY}\", secret key \"${MINIO_SECRET_KEY}\" and default bucket \"${MINIO_DEFAULT_BUCKET}\"."
-}
-
 install_openebs(){
   echo "Installing OpenEBS…"
   local NODE_NAME
@@ -449,13 +440,6 @@ install_openebs(){
     [ ${i} -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
     docker exec ${NODE_NAME} mkdir -p /run/udev
   done
-
-  # set OpenEBS-based HostPath as default storage class
-  for i in $(kubectl get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}'); do
-    kubectl annotate sc ${i} storageclass.kubernetes.io/is-default-class-
-  done
-
-  kubectl apply -f "${MYDIR}/manifests/openebs-storage-classes.yml"
   HELMFILE_ARGS+=('-l' "name=${RELEASES_OPENEBS:=openebs}")
 }
 
@@ -547,7 +531,6 @@ kube_up(){
   # apply helm releases
   helmfile --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" ${HELMFILE_ARGS[@]} sync
 
-  [ ${INSTALL_STORAGE} -eq 0 ] && install_minio_client
   [ ${INSTALL_SERVICE_MESH} -eq 0 ] && [ ${ISTIO_SIDECAR_AUTOINJECT:=0} -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled ||:
     #&& kubectl apply -f "${MYDIR}/manifests/selfsigned-certmanager.yml" ||:
 
@@ -683,8 +666,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.18.2-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.18.3}"
+    [k3d]="${RUNTIME_TAG:-1.18.4-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.18.4}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
