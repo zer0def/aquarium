@@ -2,9 +2,10 @@
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
 {{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "prometheusOperator" (default "prometheus-operator" (env "RELEASES_PROMETHEUS_OPERATOR")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
-{{- $versions := dict "certManager" (default "0.15.1" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.0.0" (env "VERSIONS_HARBOR")) "istio" (default "1.6.3" (env "VERSIONS_ISTIO")) "jaeger" (default "1.18.1" (env "VERSIONS_JAEGER")) "openebs" (default "1.11.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.6.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
+{{- $versions := dict "certManager" (default "0.15.1" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.0.1" (env "VERSIONS_HARBOR")) "istio" (default "1.6.4" (env "VERSIONS_ISTIO")) "jaeger" (default "1.18.1" (env "VERSIONS_JAEGER")) "openebs" (default "1.11.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.6.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.12.2" (env "VERSIONS_THANOS")) -}}
 
 {{- $istioChartManifestBase := "./istio/manifests/charts" -}}
+
 {{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.4.0" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "clair" (dict "name" (default "harbor_clair" (env "HARBOR_DB_CLAIR_NAME")) "user" (default "harbor_clair" (env "HARBOR_DB_CLAIR_USER")) "pass" (default "harbor_clair" (env "HARBOR_DB_CLAIR_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
 {{- $minio := dict "accessKey" (default "AKIAIOSFODNN7EXAMPLE" (env "MINIO_ACCESS_KEY")) "secretKey" (default "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" (env "MINIO_SECRET_KEY")) "servicePort" (default 9000 (env "MINIO_SVC_PORT")) "defaultBucket" (default "minio-bucket" (env "MINIO_DEFAULT_BUCKET")) -}}
 
@@ -37,6 +38,8 @@ repositories:
   url: https://releases.rancher.com/server-charts/latest
 - name: rook
   url: https://charts.rook.io/release
+- name: yugabyte
+  url: https://charts.yugabyte.com
 {{- if semverCompare "<1.6" $versions.istio }}
 - name: istio
   url: https://storage.googleapis.com/istio-release/releases/{{ $versions.istio }}/charts
@@ -46,6 +49,11 @@ helmDefaults:
   wait: true
   timeout: {{ $helmTimeout }}
   tillerless: false
+
+#bases: {}
+#helmFiles:
+#- path: postgres-operator-helmfile.yaml
+#- path: rancher-helmfile.yaml
 
 templates:
   istio:
@@ -421,6 +429,13 @@ releases:
   values:
   - fullnameOverride: {{ $releases.patroni | quote }}
     replicaCount: 1
+    image:
+      #repository: registry.opensource.zalan.do/acid/spilo-10
+      #tag: 1.5-p5
+      #repository: registry.opensource.zalan.do/acid/spilo-11
+      #tag: 1.6-p1
+      repository: registry.opensource.zalan.do/acid/spilo-12
+      tag: 1.6-p3
     pgbouncer:
       replicaCount: 1
     databases:
@@ -444,13 +459,6 @@ releases:
       #pass: {{ $harbor.db.notarySigner.pass | quote }}
     env:
       ALLOW_NOSSL: "true"
-    image:
-      #repository: registry.opensource.zalan.do/acid/spilo-10
-      #tag: 1.5-p5
-      #repository: registry.opensource.zalan.do/acid/spilo-11
-      #tag: 1.6-p1
-      repository: registry.opensource.zalan.do/acid/spilo-12
-      tag: 1.6-p3
     spiloConfiguration:
       bootstrap:
         initdb:

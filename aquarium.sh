@@ -142,8 +142,11 @@ registry_proxy_post::k3d(){
 }
 
 registry_proxy_post::kubedee(){
-  local TMP_CA="$(mktemp)" TMP_CRIO_CONF="$(mktemp)"
-  lxc file pull kubedee-${CLUSTER_NAME}-controller/etc/ssl/certs/ca-certificates.crt "${TMP_CA}"
+  local TMP_CA="$(mktemp)" TMP_CRIO_CONF="$(mktemp)" \
+    CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
+    #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
+  lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
+  chmod u+w "${TMP_CA}"
   mkdir -p ${REGISTRY_PROXY_HOST_PATH}
 
   #lxc file pull kubedee-${CLUSTER_NAME}-controller/etc/crio/crio.conf "${TMP_CRIO_CONF}"
@@ -170,7 +173,7 @@ Environment="NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
 EOF
 
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
-    lxc file push "${TMP_CA}" ${i}/etc/ssl/certs/ca-certificates.crt
+    lxc file push "${TMP_CA}" "${i}${CACERT_PATH}"
     lxc file push "${TMP_SYSTEMD_SVC}" ${i}/etc/systemd/system/crio.service.d/registry-proxy.conf -p
     #lxc file push "${TMP_CRIO_CONF}" ${i}/etc/crio/crio.conf
     lxc exec ${i} -- /bin/sh -c 'systemctl daemon-reload && systemctl restart crio'
@@ -667,7 +670,7 @@ main(){
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
     [k3d]="${RUNTIME_TAG:-1.18.4-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.18.4}"
+    [kubedee]="${RUNTIME_TAG:-1.18.5}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
