@@ -448,8 +448,9 @@ install_openebs(){
 
 install_prometheus_operator(){
   echo "Installing Prometheus Operator…"
-  local RELEASES_PROMETHEUS_OPERATOR=${RELEASES_PROMETHEUS_OPERATOR:=prometheus-operator}
+  local RELEASES_KUBE_PROMETHEUS_STACK=${RELEASES_KUBE_PROMETHEUS_STACK:=kube-prometheus-stack}
   : ${THANOS_OBJSTORE_CONFIG_SECRET:=thanos-objstore-config}
+  : ${THANOS_SIDECAR_MTLS_SECRET:=thanos-sidecar-mtls}
 
   # has to be object-store.yaml due to hard-coding of the filename in banzaicloud/thanos chart's secret.yaml template
   : ${THANOS_OBJSTORE_CONFIG_FILENAME:=object-store.yaml}
@@ -458,6 +459,7 @@ install_prometheus_operator(){
   NAMESPACES_STORAGE="${NAMESPACES_STORAGE}" \
   THANOS_OBJSTORE_CONFIG_SECRET="${THANOS_OBJSTORE_CONFIG_SECRET}" \
   THANOS_OBJSTORE_CONFIG_FILENAME="${THANOS_OBJSTORE_CONFIG_FILENAME}" \
+  THANOS_SIDECAR_MTLS_SECRET="${THANOS_SIDECAR_MTLS_SECRET}" \
   RELEASES_MINIO="${RELEASES_MINIO}" \
   MINIO_DEFAULT_BUCKET="${MINIO_DEFAULT_BUCKET}" \
   MINIO_SVC_PORT="${MINIO_SVC_PORT}" \
@@ -466,12 +468,12 @@ install_prometheus_operator(){
   envsubst <${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl | kubectl apply -f-
 
   NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
-  RELEASES_PROMETHEUS_OPERATOR="${RELEASES_PROMETHEUS_OPERATOR}" \
+  RELEASES_KUBE_PROMETHEUS_STACK="${RELEASES_KUBE_PROMETHEUS_STACK}" \
   envsubst <${MYDIR}/manifests/thanos-prometheus-query-svc.yml.shtpl | kubectl apply -f-
 
   HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_THANOS:=thanos}"
-    '-l' "name=${RELEASES_PROMETHEUS_OPERATOR}"
+    '-l' "name=${RELEASES_KUBE_PROMETHEUS_STACK}"
     '-l' "name=${RELEASES_PROMETHEUS_ADAPTER:=prometheus-adapter}"
   )
 }

@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${RELEASES_PROMETHEUS_OPERATOR}-thanos
+  name: ${RELEASES_KUBE_PROMETHEUS_STACK}-thanos
   namespace: ${NAMESPACES_MONITORING}
 spec:
   type: ClusterIP
