@@ -188,14 +188,16 @@ registry_proxy_post(){
 
 launch_cluster_post(){
   # PSP
-  local ALLOW_ALL_PSP
+  local ALLOW_ALL_PSP TMP_PSP="$(mktemp)"
   : ${ALLOW_ALL_PSP:=0}
   PRIVILEGED_PSP=99-privileged
   RESTRICTED_PSP=01-restricted
   [ ${ALLOW_ALL_PSP} -eq 0 ] && DEFAULT_PSP=${PRIVILEGED_PSP} || DEFAULT_PSP=${RESTRICTED_PSP}
-  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <${MYDIR}/manifests/priviledged-psp.yml.shtpl | kubectl apply -f-
-  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <${MYDIR}/manifests/restricted-psp.yml.shtpl | kubectl apply -f-
-  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <${MYDIR}/manifests/default-psp-crb.yml.shtpl | kubectl apply -f-
+  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <${MYDIR}/manifests/priviledged-psp.yml.shtpl >>"${TMP_PSP}"
+  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <${MYDIR}/manifests/restricted-psp.yml.shtpl >>"${TMP_PSP}"
+  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <${MYDIR}/manifests/default-psp-crb.yml.shtpl >>"${TMP_PSP}"
+  until kubectl apply -f "${TMP_PSP}" &>/dev/null; do :; done
+  rm "${TMP_PSP}"
 
   [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && registry_proxy_post
 }
@@ -345,7 +347,8 @@ teardown_cluster::kubedee(){
 install_dashboard(){
   # https://www.artificialworlds.net/blog/2012/10/17/bash-associative-array-examples/
   declare -A K8S_DASHBOARD=(
-    [v1.18]="v2.0.0"
+    [v1.19]="v2.0.4"
+    [v1.18]="v2.0.3"
     [v1.17]="v2.0.0-rc7"
     [v1.16]="v2.0.0-rc3"
     [v1.15]="v2.0.0-beta4"
@@ -367,20 +370,13 @@ setup_helm(){
   declare -A HELM_PLUGINS=(
     ['https://github.com/hypnoglow/helm-s3']="v0.9.2"
     ['https://github.com/zendesk/helm-secrets']="v2.0.2"
-    ['https://github.com/aslafy-z/helm-git']="v0.7.0"
+    ['https://github.com/aslafy-z/helm-git']="v0.8.1"
+    ['https://github.com/databus23/helm-diff']="v3.1.3"
+    ['https://github.com/hayorov/helm-gcs']="0.3.6"
   )
   helm version --template '{{.Version}}' | grep -E '^v3\.' || TILLER_SERVICE_ACCOUNT="tiller"
   # Helm v2: `helm version -c --template '{{.Client.SemVer}}'`
-  if [ -z "${TILLER_SERVICE_ACCOUNT}" ]; then  # helm3
-    HELM_PLUGINS['https://github.com/databus23/helm-diff']="v3.1.1"
-    HELM_PLUGINS['https://github.com/hayorov/helm-gcs']="0.3.1"
-  else  # helm2
-    HELM_PLUGINS['https://github.com/databus23/helm-diff']="v2.11.0+5"
-    HELM_PLUGINS['https://github.com/hayorov/helm-gcs']="0.2.2"
-    HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3"
-  fi
-
-  [ -n "${TILLER_SERVICE_ACCOUNT}" ] && install_tiller
+  [ -n "${TILLER_SERVICE_ACCOUNT}" ] && HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3" && install_tiller
 
   echo "Installing Helm plugins…"
   for i in "${!HELM_PLUGINS[@]}"; do helm plugin install ${i} --version ${HELM_PLUGINS[${i}]} ||:; done
@@ -671,8 +667,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.18.8-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.19.0}"
+    [k3d]="${RUNTIME_TAG:-1.19.2-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.19.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

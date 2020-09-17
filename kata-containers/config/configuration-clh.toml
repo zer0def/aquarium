@@ -62,7 +62,7 @@ default_memory = 2048
 #memory_slots = 10
 
 # Path to vhost-user-fs daemon.
-virtio_fs_daemon = "/usr/local/bin/virtiofsd"
+virtio_fs_daemon = "/usr/lib/qemu/virtiofsd"
 
 # Default size of DAX cache in MiB
 virtio_fs_cache_size = 1024

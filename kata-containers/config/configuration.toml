@@ -102,7 +102,7 @@ disable_block_device_use = false
 shared_fs = "virtio-9p"
 
 # Path to vhost-user-fs daemon.
-virtio_fs_daemon = "/usr/local/bin/virtiofsd"
+virtio_fs_daemon = "/usr/lib/qemu/virtiofsd"
 
 # Default size of DAX cache in MiB
 virtio_fs_cache_size = 1024
