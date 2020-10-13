@@ -1,12 +1,15 @@
 {{- $helmTimeout := default 86400 (env "HELM_TIMEOUT") -}}
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
-{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePrometheusStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
+{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
 {{- $versions := dict "certManager" (default "0.15.1" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.1.0" (env "VERSIONS_HARBOR")) "istio" (default "1.7.3" (env "VERSIONS_ISTIO")) "jaeger" (default "1.20.0" (env "VERSIONS_JAEGER")) "openebs" (default "2.1.0" (env "VERSIONS_OPENEBS") | quote) "openebsNdm" (default "0.8.2" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.7.0" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.15.0" (env "VERSIONS_THANOS")) -}}
+
+{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.5.0" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "clair" (dict "name" (default "harbor_clair" (env "HARBOR_DB_CLAIR_NAME")) "user" (default "harbor_clair" (env "HARBOR_DB_CLAIR_USER")) "pass" (default "harbor_clair" (env "HARBOR_DB_CLAIR_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
 
 {{- $istioChartManifestBase := "./istio/manifests/charts" -}}
 
-{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.5.0" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "clair" (dict "name" (default "harbor_clair" (env "HARBOR_DB_CLAIR_NAME")) "user" (default "harbor_clair" (env "HARBOR_DB_CLAIR_USER")) "pass" (default "harbor_clair" (env "HARBOR_DB_CLAIR_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
+{{- $kubePromStackChartVersion := "9.4.10" -}}
+
 {{- $minio := dict "accessKey" (default "AKIAIOSFODNN7EXAMPLE" (env "MINIO_ACCESS_KEY")) "secretKey" (default "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" (env "MINIO_SECRET_KEY")) "servicePort" (default 9000 (env "MINIO_SVC_PORT")) "defaultBucket" (default "minio-bucket" (env "MINIO_DEFAULT_BUCKET")) -}}
 
 {{- $openebsOmitLoopDevs := default "" (env "OPENEBS_OMIT_LOOPDEVS") -}}
@@ -272,7 +275,7 @@ releases:
   namespace: {{ $namespaces.network }}
   chart: {{ $istioChartManifestBase }}/istio-telemetry/prometheusOperator
   needs:
-  - {{ $namespaces.monitoring }}/{{ $releases.kubePrometheusStack }}
+  - {{ $namespaces.monitoring }}/{{ $releases.kubePromStack }}
 {{- if semverCompare "<1.6" $versions.istio }}
   - {{ $namespaces.network }}/{{ $releases.istio.old }}
 {{- else }}
@@ -493,10 +496,20 @@ releases:
       readOnly:
         enabled: true
         port: {{ $redis.ports.readonly }}
+      metrics:
+        enabled: true
     redis:
       port: {{ $redis.ports.readwrite }}
     sentinel:
       port: {{ $redis.ports.sentinel }}
+    exporter:
+      enabled: true
+      tag: v1.12.0-alpine
+      extraArgs:  # ??
+        ping-on-connect: true
+        redis-only-metrics: true
+      serviceMonitor:
+        enabled: true
     auth: true
     redisPassword: {{ $redis.password }}
 - name: {{ $releases.harbor }}
@@ -612,13 +625,14 @@ releases:
       replicaLabels:
       - prometheus_replica  # server-scoped
       #- prometheus  # cluster-scoped
-- name: {{ $releases.kubePrometheusStack }}
+- name: {{ $releases.kubePromStack }}
   namespace: {{ $namespaces.monitoring }}
   chart: prometheus-community/kube-prometheus-stack
+  version: {{ $kubePromStackChartVersion }}
   needs:
   - {{ $namespaces.monitoring }}/{{ $releases.thanos }}
   values:
-  - fullnameOverride: {{ $releases.kubePrometheusStack | quote }}
+  - fullnameOverride: {{ $releases.kubePromStack | quote }}
     prometheus:
       prometheusSpec:
         podMetadata:
@@ -662,13 +676,13 @@ releases:
   namespace: {{ $namespaces.monitoring }}
   chart: prometheus-community/prometheus-adapter
   needs:
-  - {{ $namespaces.monitoring }}/{{ $releases.kubePrometheusStack }}
+  - {{ $namespaces.monitoring }}/{{ $releases.kubePromStack }}
   values:
   - image:
       repository: directxman12/k8s-prometheus-adapter
       tag: v{{ $versions.prometheusAdapter }}
     prometheus:
-      url: "http://{{ $releases.kubePrometheusStack }}-prometheus.{{ $namespaces.monitoring }}.svc"
+      url: "http://{{ $releases.kubePromStack }}-prometheus.{{ $namespaces.monitoring }}.svc"
     # https://github.com/DirectXMan12/k8s-prometheus-adapter/blob/master/docs/config.md
     # use autoscaling/v2beta[12] HorizontalPodAutoscaler
     rules: {}
