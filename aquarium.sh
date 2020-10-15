@@ -667,8 +667,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.19.2-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.19.2}"
+    [k3d]="${RUNTIME_TAG:-1.19.3-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.19.3}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
@@ -676,7 +676,7 @@ main(){
   : ${CLUSTER_CONFIG_HOST_PATH:=/var/tmp/k3s/${CLUSTER_NAME}}
 
   # registry proxy config
-  : ${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.3.0"}
+  : ${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.4.1"}
   REGISTRY_PROXY_DOCKER_ARGS=()
   : ${REGISTRY_PROXY_HOSTNAME:="${K8S_RUNTIME}-${CLUSTER_NAME}-registry-proxy-cache.local"}
   : ${REGISTRY_PROXY_HOST_PATH:=/var/tmp/oci-registry}
