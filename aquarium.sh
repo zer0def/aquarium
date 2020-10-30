@@ -1,12 +1,12 @@
 #!/bin/bash -e
-[ ${SCRIPT_DEBUG:=1} -eq 0 ] && set -x
+[ "${SCRIPT_DEBUG:=1}" -eq 0 ] && set -x && export KUBEDEE_DEBUG=1
 
 # inb4 someone comes out yelling they don't have coreutils installed
 BINARY_DEPENDENCIES=(docker helm helmfile kubectl)
 
 # currently installed resources' requests have a hard time fitting on sub-quad-thread machines
-DEFAULT_WORKERS=$((4/$(nproc)))
-[ ${DEFAULT_WORKERS} -lt 1 ] && DEFAULT_WORKERS=1
+DEFAULT_WORKERS="$((4/$(nproc)))"
+[ "${DEFAULT_WORKERS}" -lt 1 ] && DEFAULT_WORKERS=1
 
 DEFAULT_PROXY_REGISTRIES=(
   gcr.io quay.io "registry.opensource.zalan.do"
@@ -20,16 +20,20 @@ KUBE_NOPROXY_SETTING=(
 
 K3D_OPTS=()
 KUBEDEE_OPTS=()
-K3D_LIB_MOUNTS_ALL=()
-MYDIR="$(dirname $(readlink -f ${0}))"
+MOUNTS_ALL=()
+LIB_MOUNTS_ALL=()
+RESTART_CRIO=1
+KATA_ROOT="${KATA_ROOT:-/usr}"
+KATA_SYSTEM_BINARIES=1
+MYDIR="$(dirname "$(readlink -f "${0}")")"
 
 string_join() { local IFS="$1"; shift; echo "$*"; }
 
 install_docker_volume_plugin(){
-  local PLUGIN_LS_OUT=$(docker plugin ls --format '{{.Name}},{{.Enabled}}' | grep -E "^${DOCKER_VOLUME_PLUGIN}")
-  [ -z "${PLUGIN_LS_OUT}" ] && docker plugin install ${DOCKER_VOLUME_PLUGIN} DATA_DIR=${DOCKER_VOLUME_DIR:=/tmp/docker-loop/data}
+  local PLUGIN_LS_OUT="$(docker plugin ls --format '{{.Name}},{{.Enabled}}' | grep -E "^${DOCKER_VOLUME_PLUGIN}")"
+  [ -z "${PLUGIN_LS_OUT}" ] && docker plugin install "${DOCKER_VOLUME_PLUGIN}" DATA_DIR="${DOCKER_VOLUME_DIR:=/tmp/docker-loop/data}"
   echo "Sleeping 3 seconds for docker-volume-loopback to launch…" && sleep 3
-  [ "${PLUGIN_LS_OUT##*,}" != "true" ] && docker plugin enable ${DOCKER_VOLUME_PLUGIN} ||:
+  [ "${PLUGIN_LS_OUT##*,}" != "true" ] && docker plugin enable "${DOCKER_VOLUME_PLUGIN}" ||:
 }
 
 create_volumes(){
@@ -37,48 +41,67 @@ create_volumes(){
   : ${DOCKER_VOLUME_DRIVER:=${DOCKER_VOLUME_PLUGIN:-local}}
   [ -n "${DOCKER_VOLUME_PLUGIN}" ] && install_docker_volume_plugin
   local VOLUME_NAME
-  for i in $(seq 0 ${NUM_WORKERS}); do
-    [ ${i} -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
-    docker volume create -d ${DOCKER_VOLUME_DRIVER} ${VOLUME_NAME} -o sparse=true -o fs=ext4 -o size=20GiB &>/dev/null
+  for i in $(seq 0 "${NUM_WORKERS}"); do
+    [ "${i}" -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    docker volume create -d "${DOCKER_VOLUME_DRIVER}" "${VOLUME_NAME}" -o sparse=true -o fs=ext4 -o size=20GiB &>/dev/null
     K3D_OPTS+=('-v' "${VOLUME_NAME}:/var/lib/rancher/k3s@${VOLUME_NAME}")
-    if [ ${OLD_K3S} -ne 0 ]; then
+    if [ "${OLD_K3S}" -ne 0 ]; then
       docker volume create \
-        -d ${DOCKER_VOLUME_DRIVER} \
+        -d "${DOCKER_VOLUME_DRIVER}" \
         -o sparse=true \
         -o fs=ext4 \
         -o size=10GiB \
-        ${VOLUME_NAME}-kubelet &>/dev/null
+        "${VOLUME_NAME}-kubelet" &>/dev/null
       K3D_OPTS+=('-v' "${VOLUME_NAME}-kubelet:/var/lib/kubelet@${VOLUME_NAME}")
     fi
   done
 }
 
+kata::common(){
+  local KATA_PATH="${PATH}" VIRTIOFSD_MOUNT='/usr/lib/qemu' QEMU_SHARE='/usr/share/qemu' KATA_LIB='/usr/lib/kata-containers'
+  if [ "${KATA_ROOT}" != "/usr" ]; then
+    KATA_PATH="${KATA_ROOT}/bin:${PATH}"  # add condition based on KATA_SYSTEM_BINARIES
+    KATA_LIB="${KATA_ROOT}/libexec/kata-containers"
+    VIRTIOFSD_MOUNT="${KATA_ROOT}/libexec/kata-qemu"
+    QEMU_SHARE="${KATA_ROOT}/share/kata-qemu/qemu"
+  fi ||:
+  CLH_HOST_BIN="$(PATH="${KATA_PATH}" command -v cloud-hypervisor-static || PATH="${KATA_PATH}" command -v cloud-hypervisor)" ||:
+  [ -n "${CLH_HOST_BIN}" ] && MOUNTS_ALL+=("$(readlink -f "${CLH_HOST_BIN}"):/usr/local/bin/cloud-hypervisor") ||:
+  MOUNTS_ALL+=(
+    "${KATA_LIB}:/usr/local/lib/kata-containers"
+    "${KATA_ROOT}/share/kata-containers:/usr/local/share/kata-containers"
+    "${QEMU_SHARE}:${QEMU_SHARE}"
+    "${VIRTIOFSD_MOUNT}:/usr/local/lib/qemu"
+    "${MYDIR}/kata-containers/config:/usr/local/share/defaults/kata-containers"
+    "${MYDIR}/kata-containers/config:/opt/kata/share/defaults/kata-containers"
+  )
+  #for i in /dev/kvm /dev/net/tun /dev/vhost-net /dev/vhost-scsi /dev/vhost-vsock /dev/vsock; do MOUNTS_ALL+=("${i}:${i}"); done
+  for i in $(PATH="${KATA_PATH}" command -v containerd-shim-kata-v2 kata-monitor kata-proxy kata-shim kata-runtime qemu-system-x86_64 qemu-virtiofs-system-x86_64 virtiofsd virtiofsd-dax firecracker jailer); do
+    MOUNTS_ALL+=("$(readlink -f "${i}"):/usr/local/bin/${i##*/}")
+    # find libraries for dynamic linking
+    for j in $(ldd "${i}" 2>/dev/null | awk '/ => / {print $1}'); do
+      local _awk_lib_name="$(echo "${j##*/}" | sed -e 's/\+/\\+/g')"
+      [ -z "${j##*/}" ] && continue
+      local _lib_host_path="$(ldconfig -p | awk "/${_awk_lib_name} \(libc6,x86-64.*) => / {print \$NF}")"
+      LIB_MOUNTS_ALL+=("${_lib_host_path}")
+    done
+  done
+}
+
 # common functions start
 kata_pre::k3d(){
-  # only qemu works for now
   K3D_OPTS+=(
     '-e' 'LD_LIBRARY_PATH=/lib'
-    '-v' '/usr/lib/kata-containers:/usr/local/lib/kata-containers'
-    '-v' '/usr/share/kata-containers:/usr/local/share/kata-containers'
-    '-v' '/usr/share/qemu:/usr/local/share/qemu'
-    '-v' "${MYDIR}/kata-containers/config:/usr/local/share/defaults/kata-containers"
-  ) \
-  && K3D_LIB_MOUNTS_ALL+=('-v /usr/lib/ld-linux-x86-64.so.2:/lib64/ld-linux-x86-64.so.2') \
-  && for i in containerd-shim-kata-v2 kata-runtime qemu-system-x86_64 firecracker jailer cloud-hypervisor virtiofsd; do
-    local _bin=$(type -p ${i}) || continue
-    K3D_OPTS+=('-v' "$(readlink -f ${_bin}):/usr/local/bin/${i}")
-    for j in $(ldd ${_bin} 2>/dev/null | awk '/ => / {print $1}'); do
-      local _awk_lib_name="$(echo ${j##*/} | sed -e 's/\+/\\+/g')"
-      [ -n "${j##*/}" ] || continue
-      local _lib_host_path=$(ldconfig -p | awk "/${_awk_lib_name} \(libc6,x86-64.*) => / {print \$NF}")
-      K3D_LIB_MOUNTS_ALL+=("-v ${_lib_host_path}:/lib/${j##*/}")
-    done
-  done \
-  && for i in qemu fc clh; do
+    '-v' '/usr/lib/ld-linux-x86-64.so.2:/lib64/ld-linux-x86-64.so.2'
+  )
+  for i in "${MOUNTS_ALL[@]}"; do K3D_OPTS+=('-v' "${i}"); done
+  for i in $(printf "%s\n" "${LIB_MOUNTS_ALL[@]}" | sort -u); do K3D_OPTS+=('-v' "${i}:/lib/${i##*/}"); done
+
+  for i in qemu fc clh; do
     # https://github.com/kata-containers/documentation/blob/master/how-to/containerd-kata.md
     # https://github.com/kata-containers/packaging/blob/master/kata-deploy/scripts/kata-deploy.sh
     K3D_OPTS+=('-v' "${MYDIR}/kata-containers/shims/containerd-shim-kata-${i}-${SHIM_VERSION}:/usr/local/bin/containerd-shim-kata-${i}-${SHIM_VERSION}")
-    cat <<EOF >> ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
+    cat <<EOF >> "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl"
 [plugins.cri.containerd.runtimes.kata-${i}]
   runtime_type = "io.containerd.kata-${i}.${SHIM_VERSION}"
   #privileged_without_host_devices = true
@@ -86,7 +109,7 @@ kata_pre::k3d(){
   ConfigPath = "/usr/local/share/defaults/kata-containers/configuration-${i}.toml"
 EOF
   done \
-  && cat <<EOF >> ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
+  && cat <<EOF >> "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl"
 [plugins.cri.containerd.untrusted_workload_runtime]
   runtime_type = "io.containerd.kata.${SHIM_VERSION}"
   privileged_without_host_devices = true
@@ -95,17 +118,9 @@ EOF
 EOF
 }
 
-kata_pre::kubedee(){
-  :
-}
-
-kata_pre(){
-  kata_pre::${K8S_RUNTIME}
-}
-
 registry_proxy_pre::k3d(){
-  mkdir -p ${REGISTRY_PROXY_HOST_PATH} \
-  && docker run --entrypoint '' --rm rancher/k3s:v${RUNTIME_VERSIONS[k3d]} cat /etc/ssl/certs/ca-certificates.crt > ${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt \
+  mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
+  && docker run --entrypoint '' --rm "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" cat /etc/ssl/certs/ca-certificates.crt > "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt" \
   && K3D_OPTS+=(
     '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
     '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
@@ -119,25 +134,25 @@ registry_proxy_pre::kubedee(){
 }
 
 registry_proxy_pre(){
-  registry_proxy_pre::${K8S_RUNTIME}
+  "registry_proxy_pre::${K8S_RUNTIME}"
 }
 
 registry_proxy_post::common(){
   local REGISTRIES="${PROXY_REGISTRIES:=${DEFAULT_PROXY_REGISTRIES[@]}}" AUTH_REGISTRIES="${PROXY_REGISTRIES_AUTH}" TARGET_FILE="${1}"
   docker run -d \
     --name "${REGISTRY_PROXY_HOSTNAME}" \
-    -v ${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache \
+    -v "${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache" \
     -e "REGISTRIES=${REGISTRIES}" \
     -e "AUTH_REGISTRIES=${AUTH_REGISTRIES}" \
     ${REGISTRY_PROXY_DOCKER_ARGS[@]} \
-    ${REGISTRY_PROXY_REPO} &>/dev/null
-  docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> ${TARGET_FILE}
+    "${REGISTRY_PROXY_REPO}" &>/dev/null
+  docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> "${TARGET_FILE}"
 }
 
 registry_proxy_post::k3d(){
   # arguably common part start
   REGISTRY_PROXY_DOCKER_ARGS+=('--network' "k3d-${CLUSTER_NAME}")
-  registry_proxy_post::common ${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt
+  registry_proxy_post::common "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt"
   # arguably common part end
 }
 
@@ -147,10 +162,10 @@ registry_proxy_post::kubedee(){
     #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
   lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
   chmod u+w "${TMP_CA}"
-  mkdir -p ${REGISTRY_PROXY_HOST_PATH}
+  mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
 
   #lxc file pull kubedee-${CLUSTER_NAME}-controller/etc/crio/crio.conf "${TMP_CRIO_CONF}"
-  #sed -i 's/^\(#[[:space:]]*\)\?storage_driver[[:space:]]*=.*/storage_driver = "zfs"/' ${TMP_CRIO_CONF}
+  #sed -i 's/^\(#[[:space:]]*\)\?storage_driver[[:space:]]*=.*/storage_driver = "zfs"/' "${TMP_CRIO_CONF}"
 
   ## rsync somehow ducks up
   # sysctl -w kernel.unprivileged_userns_clone=1
@@ -162,10 +177,10 @@ registry_proxy_post::kubedee(){
   # lxc-to-lxd --rsync-args '-zz' --containers a1
   # lxc delete -f a1
 
-  registry_proxy_post::common ${TMP_CA}
+  registry_proxy_post::common "${TMP_CA}"
 
-  local REGISTRY_PROXY_ADDRESS="$(docker container inspect ${REGISTRY_PROXY_HOSTNAME} -f '{{.NetworkSettings.IPAddress}}')" TMP_SYSTEMD_SVC=$(mktemp)
-  cat <<EOF >${TMP_SYSTEMD_SVC}
+  local REGISTRY_PROXY_ADDRESS="$(docker container inspect "${REGISTRY_PROXY_HOSTNAME}" -f '{{.NetworkSettings.IPAddress}}')" TMP_SYSTEMD_SVC="$(mktemp)"
+  cat <<EOF >"${TMP_SYSTEMD_SVC}"
 [Service]
 Environment="HTTP_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
 Environment="HTTPS_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
@@ -174,16 +189,15 @@ EOF
 
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
     lxc file push "${TMP_CA}" "${i}${CACERT_PATH}"
-    lxc file push "${TMP_SYSTEMD_SVC}" ${i}/etc/systemd/system/crio.service.d/registry-proxy.conf -p
-    #lxc file push "${TMP_CRIO_CONF}" ${i}/etc/crio/crio.conf
-    lxc exec ${i} -- /bin/sh -c 'systemctl daemon-reload && systemctl restart crio'
+    lxc file push "${TMP_SYSTEMD_SVC}" "${i}/etc/systemd/system/crio.service.d/registry-proxy.conf" -p
+    RESTART_CRIO=0
   done
 
   rm "${TMP_CA}" "${TMP_SYSTEMD_SVC}" "${TMP_CRIO_CONF}"
 }
 
 registry_proxy_post(){
-  registry_proxy_post::${K8S_RUNTIME}
+  "registry_proxy_post::${K8S_RUNTIME}"
 }
 
 launch_cluster_post(){
@@ -192,32 +206,32 @@ launch_cluster_post(){
   : ${ALLOW_ALL_PSP:=0}
   PRIVILEGED_PSP=99-privileged
   RESTRICTED_PSP=01-restricted
-  [ ${ALLOW_ALL_PSP} -eq 0 ] && DEFAULT_PSP=${PRIVILEGED_PSP} || DEFAULT_PSP=${RESTRICTED_PSP}
-  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <${MYDIR}/manifests/priviledged-psp.yml.shtpl >>"${TMP_PSP}"
-  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <${MYDIR}/manifests/restricted-psp.yml.shtpl >>"${TMP_PSP}"
-  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <${MYDIR}/manifests/default-psp-crb.yml.shtpl >>"${TMP_PSP}"
+  [ "${ALLOW_ALL_PSP}" -eq 0 ] && DEFAULT_PSP="${PRIVILEGED_PSP}" || DEFAULT_PSP="${RESTRICTED_PSP}"
+  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <"${MYDIR}/manifests/priviledged-psp.yml.shtpl" >>"${TMP_PSP}"
+  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <"${MYDIR}/manifests/restricted-psp.yml.shtpl" >>"${TMP_PSP}"
+  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <"${MYDIR}/manifests/default-psp-crb.yml.shtpl" >>"${TMP_PSP}"
   until kubectl apply -f "${TMP_PSP}" &>/dev/null; do :; done
   rm "${TMP_PSP}"
 
-  [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && registry_proxy_post
+  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post
 }
 
 check_zfs(){
   return
-  [ -n "${ZFS_DATASET}" ] && [ "$(zfs get -Ho value overlay ${ZFS_DATASET})" != "on" ] \
+  [ -n "${ZFS_DATASET}" ] && [ "$(zfs get -Ho value overlay "${ZFS_DATASET}")" != "on" ] \
     && echo "Please enable ZFS dataset overlay by running \"zfs set overlay=on ${ZFS_DATASET}\"." \
     && exit 1 ||:
 }
 
 launch_cluster::k3d(){
-  [ ${INSTALL_STORAGE} -eq 0 ] && K3D_OPTS+=('--server-arg' '--disable=local-storage')
-  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && K3D_OPTS+=(
+  [ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--server-arg' '--disable=local-storage')
+  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && K3D_OPTS+=(
     '--server-arg' '--disable=traefik'
     '--server-arg' '--disable=servicelb'
   )
 
   # base containerd config
-  cat <<EOF > ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
+  cat <<EOF > "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl"
 # Original section: no changes
 [plugins.opt]
 path = "{{ .NodeConfig.Containerd.Opt }}"
@@ -267,54 +281,90 @@ EOF
 #EOF
 #  done
 
+  [ "${INSTALL_KATA}" -eq 0 ] && kata::common && kata_pre::k3d
   [ "$(docker info -f '{{.Driver}}')" = "zfs" ] \
     && ZFS_DATASET="$(docker info -f '{{range $a := .DriverStatus}}{{if eq (index $a 0) "Parent Dataset"}}{{(index $a 1)}}{{end}}{{end}}')" \
     && check_zfs && create_volumes ||:
 
   echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' && create_volumes ||:
 
-  K3D_OPTS+=($(printf "%s\n" "${K3D_LIB_MOUNTS_ALL[@]}" | sort -u))
+  #K3D_OPTS+=($(printf "%s\n" "${K3D_LIB_MOUNTS_ALL[@]}" | sort -u))
   # enable RuntimeClass admission controller?: https://kubernetes.io/docs/concepts/containers/runtime-class/
   k3d c -t 0 \
-    -n ${CLUSTER_NAME} \
-    -w ${NUM_WORKERS} \
-    -a $((6443+${RANDOM}%100)) \
+    -n "${CLUSTER_NAME}" \
+    -w "${NUM_WORKERS}" \
+    -a "$((6443+${RANDOM}%100))" \
     --agent-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
     --agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
     --server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
     --server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
     --server-arg '--kube-apiserver-arg=enable-admission-plugins=PodSecurityPolicy,NodeRestriction' \
-    -i rancher/k3s:v${RUNTIME_VERSIONS[k3d]} \
-    -v ${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl \
+    -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
+    -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
-  export KUBECONFIG=$(k3d get-kubeconfig -n ${CLUSTER_NAME})
+  export KUBECONFIG="$(k3d get-kubeconfig -n "${CLUSTER_NAME}")"
   launch_cluster_post
 
   echo "Waiting for k3s cluster to come up…"
-  until kubectl wait --for condition=ready node k3d-${CLUSTER_NAME}-server; do sleep 1; done 2>/dev/null
-  for i in $(seq ${NUM_WORKERS}); do
-    until kubectl wait --for condition=ready node k3d-${CLUSTER_NAME}-worker-$((${i}-1)); do sleep 1; done 2>/dev/null
+  until kubectl wait --for condition=ready node "k3d-${CLUSTER_NAME}-server"; do sleep 1; done 2>/dev/null
+  for i in $(seq "${NUM_WORKERS}"); do
+    if [ "${INSTALL_KATA}" -eq 0 ]; then
+      [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+      docker exec "${NODE_NAME}" /bin/sh -c 'mkdir -p /run/kata-containers/shared/sandboxes; mount --bind --make-rshared /run/kata-containers/shared/sandboxes /run/kata-containers/shared/sandboxes'
+    fi
+    until kubectl wait --for condition=ready node "k3d-${CLUSTER_NAME}-worker-$((${i}-1))"; do sleep 1; done 2>/dev/null
   done
 
-  [ ${OLD_K3S} -eq 0 ] || until kubectl -n kube-system wait --for condition=available deploy metrics-server; do sleep 1; done 2>/dev/null
+  [ "${OLD_K3S}" -eq 0 ] || until kubectl -n kube-system wait --for condition=available deploy metrics-server; do sleep 1; done 2>/dev/null
 }
 
 launch_cluster::kubedee(){
-  local LXD_STORAGE_POOL="kubedee"
+  local LXD_STORAGE_POOL="kubedee" TMP_CRIO_CONF="$(mktemp)"
 
-  [ "$(lxc storage show ${LXD_STORAGE_POOL} | awk '/^driver:\s+/ {print $NF}')" = "zfs" ] \
-    && ZFS_DATASET="$(lxc storage get ${LXD_STORAGE_POOL} zfs.pool_name)" && check_zfs
+  [ "$(lxc storage show "${LXD_STORAGE_POOL}" | awk '/^driver:\s+/ {print $NF}')" = "zfs" ] \
+    && ZFS_DATASET="$(lxc storage get "${LXD_STORAGE_POOL}" zfs.pool_name)" && check_zfs
 
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
-  "${MYDIR}/kubedee/kubedee" --kubernetes-version v${RUNTIME_VERSIONS[kubedee]} --num-worker ${NUM_WORKERS} ${KUBEDEE_OPTS[@]} up ${CLUSTER_NAME}
+  "${MYDIR}/kubedee/kubedee" --kubernetes-version "v${RUNTIME_VERSIONS[kubedee]}" --num-worker "${NUM_WORKERS}" ${KUBEDEE_OPTS[@]} up "${CLUSTER_NAME}"
+  $("${MYDIR}/kubedee/kubedee" kubectl-env "${CLUSTER_NAME}")
+
+  until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null ||:
+  until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null ||:
+
+  [ "${INSTALL_KATA}" -eq 0 ] && kata::common \
+  && for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
+    for j in /dev/kvm /dev/net/tun /dev/vhost-net /dev/vhost-scsi /dev/vhost-vsock /dev/vsock; do
+      lxc config device add "${i}" "${j//\//}" unix-char path="${j}"
+    done
+    for j in qemu fc clh; do
+      lxc config device add "${i}" "config-${j}" disk source="${MYDIR}/kata-containers/shims/containerd-shim-kata-${j}-${SHIM_VERSION}" path="/usr/local/bin/containerd-shim-kata-${j}-${SHIM_VERSION}"
+    done
+    for j in "${MOUNTS_ALL[@]}"; do
+      lxc config device add "${i}" "$(uuidgen)" disk source="${j%:*}" path="${j##*:}"
+    done
+    for j in $(printf "%s\n" "${LIB_MOUNTS_ALL[@]}" | sort -u); do
+      lxc config device add "${i}" "$(uuidgen)" disk source="${j}" path="/usr/lib64/${j##*/}"
+    done
+    RUNTIMES_ROOT=/usr/local envsubst <"${MYDIR}/manifests/crio-runtime-override.conf.tpl" >"${TMP_CRIO_CONF}"
+    lxc file push -p "${TMP_CRIO_CONF}" "${i}/etc/crio/crio.conf.d/00-runtimes.conf"
+
+    # might want to do this more persistently
+    lxc exec "${i}" -- /bin/sh -c 'mkdir -p /run/kata-containers/shared/sandboxes; mount --bind --make-rshared /run/kata-containers/shared/sandboxes /run/kata-containers/shared/sandboxes'
+    RESTART_CRIO=0
+  done ||:
 
   launch_cluster_post
+
+  [ "${RESTART_CRIO}" -eq 0 ] && for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
+    lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
+  done
+  rm "${TMP_CRIO_CONF}"
 }
 
 launch_cluster(){
-  [ ${K8S_RUNTIME} = "k3d" ] && mkdir -p ${CLUSTER_CONFIG_HOST_PATH}/ssl
-  [ ${INSTALL_LOCAL_REGISTRY:=1} -eq 0 ] && K3D_OPTS+=(
+  [ "${K8S_RUNTIME}" = "k3d" ] && mkdir -p "${CLUSTER_CONFIG_HOST_PATH}/ssl"
+  [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && K3D_OPTS+=(
     '--registry-name' "${LOCAL_REGISTRY_HOST:=registry.local}"
     '--registry-port' "${LOCAL_REGISTRY_PORT:=5000}"
     '--enable-registry'
@@ -322,26 +372,25 @@ launch_cluster(){
   ) && KUBEDEE_OPTS+=('--enable-insecure-registry') \
   && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
 
-  [ ${INSTALL_KATA} -eq 0 ] && kata_pre
-  [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && registry_proxy_pre
+  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_pre
 
-  launch_cluster::${K8S_RUNTIME}
+  "launch_cluster::${K8S_RUNTIME}"
 
   # Kata-post
-  [ ${INSTALL_KATA} -eq 0 ] && kubectl apply -f "${MYDIR}/manifests/kata-runtime-classes.yml" \
+  [ "${INSTALL_KATA}" -eq 0 ] && kubectl apply -f "${MYDIR}/manifests/kata-runtime-classes.yml" \
     && [ "${K8S_RUNTIME}" = "k3d" ] \
     && kubectl apply -f "${MYDIR}/manifests/k3d-syslogd.yml" \
     && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
 }
 
 teardown_cluster::k3d(){
-  k3d d --prune -n ${CLUSTER_NAME} ||:
-  rm -rf ${CLUSTER_CONFIG_HOST_PATH} ||:
+  k3d d --prune -n "${CLUSTER_NAME}" ||:
+  rm -rf "${CLUSTER_CONFIG_HOST_PATH}" ||:
   echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' || [ "$(docker info -f '{{.Driver}}')" = "zfs" ] && docker volume rm -f $(docker volume ls --format '{{.Name}}' | awk "/^${K8S_RUNTIME}-${CLUSTER_NAME}-/") &>/dev/null ||:
 }
 
 teardown_cluster::kubedee(){
-  "${MYDIR}/kubedee/kubedee" delete ${CLUSTER_NAME} ||:
+  "${MYDIR}/kubedee/kubedee" delete "${CLUSTER_NAME}" ||:
 }
 
 install_dashboard(){
@@ -357,8 +406,8 @@ install_dashboard(){
   echo "Installing Dashboard…"
   local KUBELET_VERSION="$(kubectl get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' | awk -F- '{print $1}')"
 
-  [ ${K8S_DASHBOARD[${KUBELET_VERSION%.*}]+_} ] \
-    && curl -sSL https://raw.githubusercontent.com/kubernetes/dashboard/${K8S_DASHBOARD[${KUBELET_VERSION%.*}]}/aio/deploy/alternative.yaml | sed \
+  [ "${K8S_DASHBOARD[${KUBELET_VERSION%.*}]+_}" ] \
+    && curl -sSL "https://raw.githubusercontent.com/kubernetes/dashboard/${K8S_DASHBOARD[${KUBELET_VERSION%.*}]}/aio/deploy/alternative.yaml" | sed \
       -e '/enable-insecure-login/d' | kubectl apply -f- \
     || (echo "Unsupported Kubelet version ${KUBELET_VERSION%.*}. No dashboard will be installed." && exit 0)
   
@@ -379,19 +428,19 @@ setup_helm(){
   [ -n "${TILLER_SERVICE_ACCOUNT}" ] && HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3" && install_tiller
 
   echo "Installing Helm plugins…"
-  for i in "${!HELM_PLUGINS[@]}"; do helm plugin install ${i} --version ${HELM_PLUGINS[${i}]} ||:; done
+  for i in "${!HELM_PLUGINS[@]}"; do helm plugin install "${i}" --version "${HELM_PLUGINS[${i}]}" ||:; done
 }
 
 install_tiller(){
   echo "Installing Tiller…"
-  TILLER_SERVICE_ACCOUNT="${TILLER_SERVICE_ACCOUNT}" envsubst <${MYDIR}/manifests/tiller-cluster-admin.yml.shtpl | kubectl apply -f-
+  TILLER_SERVICE_ACCOUNT="${TILLER_SERVICE_ACCOUNT}" envsubst <"${MYDIR}/manifests/tiller-cluster-admin.yml.shtpl" | kubectl apply -f-
 
-  helm init --upgrade --service-account ${TILLER_SERVICE_ACCOUNT}
+  helm init --upgrade --service-account "${TILLER_SERVICE_ACCOUNT}"
   until kubectl -n kube-system wait --for condition=available deploy tiller-deploy; do sleep 1; done 2>/dev/null
 }
 
 install_service_mesh(){
-  kubectl get ns ${NAMESPACES_NETWORK} &>/dev/null || kubectl create ns ${NAMESPACES_NETWORK}
+  kubectl get ns "${NAMESPACES_NETWORK}" &>/dev/null || kubectl create ns "${NAMESPACES_NETWORK}"
   echo "Installing Istio Resources…"
 
   # secure Citadel Node Agent's SDS unix socket
@@ -433,18 +482,18 @@ install_minio(){
 install_openebs(){
   echo "Installing OpenEBS…"
   local NODE_NAME
-  OPENEBS_OMIT_LOOPDEVS="$(string_join , $(losetup -nlO NAME))"
+  #OPENEBS_OMIT_LOOPDEVS="$(string_join , $(losetup -nlO NAME))"
 
-  [ "${K8S_RUNTIME}" = "k3d" ] && for i in $(seq 0 ${NUM_WORKERS}); do
-    [ ${i} -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
-    docker exec ${NODE_NAME} mkdir -p /run/udev
+  [ "${K8S_RUNTIME}" = "k3d" ] && for i in $(seq 0 "${NUM_WORKERS}"); do
+    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    docker exec "${NODE_NAME}" mkdir -p /run/udev
   done
   HELMFILE_ARGS+=('-l' "name=${RELEASES_OPENEBS:=openebs}")
 }
 
 install_prometheus_operator(){
   echo "Installing Prometheus Operator…"
-  local RELEASES_KUBE_PROMETHEUS_STACK=${RELEASES_KUBE_PROMETHEUS_STACK:=kube-prometheus-stack}
+  local RELEASES_KUBE_PROMETHEUS_STACK="${RELEASES_KUBE_PROMETHEUS_STACK:=kube-prometheus-stack}"
   : ${THANOS_OBJSTORE_CONFIG_SECRET:=thanos-objstore-config}
   : ${THANOS_SIDECAR_MTLS_SECRET:=thanos-sidecar-mtls}
 
@@ -461,11 +510,11 @@ install_prometheus_operator(){
   MINIO_SVC_PORT="${MINIO_SVC_PORT}" \
   MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" \
   MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
-  envsubst <${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl | kubectl apply -f-
+  envsubst <"${MYDIR}/manifests/thanos-objstore-secret.yml.shtpl" | kubectl apply -f-
 
   NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
   RELEASES_KUBE_PROMETHEUS_STACK="${RELEASES_KUBE_PROMETHEUS_STACK}" \
-  envsubst <${MYDIR}/manifests/thanos-prometheus-query-svc.yml.shtpl | kubectl apply -f-
+  envsubst <"${MYDIR}/manifests/thanos-prometheus-query-svc.yml.shtpl" | kubectl apply -f-
 
   HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_THANOS:=thanos}"
@@ -475,7 +524,7 @@ install_prometheus_operator(){
 }
 
 install_storage(){
-  kubectl create secret docker-registry local-harbor --docker-username=admin --docker-password=${HARBOR_ADMIN_PASSWORD:=Harbor12345}
+  kubectl create secret docker-registry local-harbor --docker-username=admin --docker-password="${HARBOR_ADMIN_PASSWORD:=Harbor12345}"
   install_openebs && install_minio && HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_HARBOR:=harbor}"
     '-l' "name=${RELEASES_PATRONI:=patroni}"
@@ -484,8 +533,8 @@ install_storage(){
 }
 
 install_monitoring(){
-  kubectl get ns ${NAMESPACES_MONITORING} &>/dev/null || kubectl create ns ${NAMESPACES_MONITORING}
-  install_prometheus_operator && [ ${INSTALL_SERVICE_MESH} -eq 0 ] && HELMFILE_ARGS+=(
+  kubectl get ns "${NAMESPACES_MONITORING}" &>/dev/null || kubectl create ns "${NAMESPACES_MONITORING}"
+  install_prometheus_operator && [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && HELMFILE_ARGS+=(
     '-l' "name=${RELEASES_ISTIO_PROMETHEUS_OPERATOR:=istio-prometheus-operator}"
   ) ||:
 }
@@ -497,20 +546,21 @@ install_serverless(){
 
 show_ingress_points::k3d(){
   local NODE_NAME
-  for i in $(seq 0 ${NUM_WORKERS}); do
-    [ ${i} -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
-    docker container inspect ${NODE_NAME} -f "{{(index .NetworkSettings.Networks \"${K8S_RUNTIME}-${CLUSTER_NAME}\").IPAddress}}"
+  for i in $(seq 0 "${NUM_WORKERS}"); do
+    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    docker container inspect "${NODE_NAME}" -f "{{(index .NetworkSettings.Networks \"${K8S_RUNTIME}-${CLUSTER_NAME}\").IPAddress}}"
   done
 }
 
 show_ingress_points::kubedee(){
-  lxc list -cn4 --format csv | awk '/-controller,/ {print $1}' | awk -F, '{print $NF}'
-  lxc list -cn4 --format csv | awk '/-worker-/ {print $1}' | awk -F, '{print $NF}'
+  for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
+    lxc config device get "${i}" eth0 ipv4.address
+  done
 }
 
 show_ingress_points(){
   echo "Worker node IP addresses:"
-  show_ingress_points::${K8S_RUNTIME}
+  "show_ingress_points::${K8S_RUNTIME}"
   #kubectl get nodes -o jsonpath='{.items[*].status.addresses[?(@.type=="InternalIP")].address}'  #|| kubectl -n kube-system get svc/traefik -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
 }
 
@@ -524,15 +574,15 @@ kube_up(){
   for i in ${!NAMESPACES[@]}; do export NAMESPACES_${i^^}="${NAMESPACES[${i}]}"; done
   for i in ${!VERSIONS[@]}; do export VERSIONS_${i^^}="${VERSIONS[${i}]}"; done
 
-  [ ${INSTALL_STORAGE} -eq 0 ] && install_storage
-  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && install_service_mesh
-  [ ${INSTALL_MONITORING} -eq 0 ] && install_monitoring
-  [ ${INSTALL_SERVERLESS} -eq 0 ] && install_serverless
+  [ "${INSTALL_STORAGE}" -eq 0 ] && install_storage
+  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && install_service_mesh
+  [ "${INSTALL_MONITORING}" -eq 0 ] && install_monitoring
+  [ "${INSTALL_SERVERLESS}" -eq 0 ] && install_serverless
 
   # apply helm releases
   helmfile --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" ${HELMFILE_ARGS[@]} sync
 
-  [ ${INSTALL_SERVICE_MESH} -eq 0 ] && [ ${ISTIO_SIDECAR_AUTOINJECT:=0} -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled ||:
+  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && [ "${ISTIO_SIDECAR_AUTOINJECT:=0}" -eq 0 ] && echo "Marking the default namespace for Envoy injection…" && kubectl label ns default istio-injection=enabled ||:
     #&& kubectl apply -f "${MYDIR}/manifests/selfsigned-certmanager.yml" ||:
 
   show_ingress_points
@@ -540,8 +590,8 @@ kube_up(){
 }
 
 kube_down(){
-  [ ${INSTALL_REGISTRY_PROXY} -eq 0 ] && docker rm -fv "${REGISTRY_PROXY_HOSTNAME}" ||:
-  teardown_cluster::${K8S_RUNTIME}
+  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && docker rm -fv "${REGISTRY_PROXY_HOSTNAME}" ||:
+  "teardown_cluster::${K8S_RUNTIME}"
 }
 
 declare -A SCRIPT_OPS=(
@@ -550,7 +600,7 @@ declare -A SCRIPT_OPS=(
 )
 
 print_usage(){
-  local MYNAME="$(basename ${0})"
+  local MYNAME="$(basename "${0}")"
   cat >&2 <<EOF
 ${MYNAME%.*} - Linux-centric scaffold for K8S development
 
@@ -595,17 +645,17 @@ main(){
   : ${CLUSTER_NAME:=k3s-default}
   : ${NUM_WORKERS:=${DEFAULT_WORKERS}}
 
-  while [ ${#} -gt 0 ]; do
+  while [ "${#}" -gt 0 ]; do
     case "${1}" in
       --no-*)
-        COMPONENT=${1/--no-/}
-        COMPONENT=${COMPONENT//-/_}
+        COMPONENT="${1/--no-/}"
+        COMPONENT="${COMPONENT//-/_}"
         declare INSTALL_${COMPONENT^^}=1
         shift
         ;;
       --with-*)
-        COMPONENT=${1/--with-/}
-        COMPONENT=${COMPONENT//-/_}
+        COMPONENT="${1/--with-/}"
+        COMPONENT="${COMPONENT//-/_}"
         declare INSTALL_${COMPONENT^^}=0
         shift
         ;;
@@ -667,11 +717,11 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.19.3-k3s1}"
+    [k3d]="${RUNTIME_TAG:-1.19.3-k3s3}"
     [kubedee]="${RUNTIME_TAG:-1.19.3}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
-  [ ${OLD_K3S} -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
+  [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
 
   : ${CLUSTER_CONFIG_HOST_PATH:=/var/tmp/k3s/${CLUSTER_NAME}}
 
@@ -683,11 +733,11 @@ main(){
   mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
 
   # in k3d, the controller node is also a worker, also need to figure out docker as a k3d-specific dep (schu/kubedee#62)
-  [ "${K8S_RUNTIME}" = "k3d" ] && NUM_WORKERS="$((${NUM_WORKERS}-1))" && BINARY_DEPENDENCIES+=(k3d) || BINARY_DEPENDENCIES+=(kubedee lxc cfssl jq)
+  [ "${K8S_RUNTIME}" = "k3d" ] && NUM_WORKERS="$((${NUM_WORKERS}-1))" && BINARY_DEPENDENCIES+=(k3d) || BINARY_DEPENDENCIES+=(lxc cfssl jq)
 
   # dep check
   for i in ${BINARY_DEPENDENCIES[@]}; do
-    type -p ${i} &>/dev/null || (echo "Missing binary \"${i}\" in PATH, exiting." && exit 1)
+    command -v "${i}" &>/dev/null || (echo "Missing binary \"${i}\" in PATH, exiting." && exit 1)
   done
 
   ${SCRIPT_OPS[${SCRIPT_OP}]}

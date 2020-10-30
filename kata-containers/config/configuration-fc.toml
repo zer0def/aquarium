@@ -12,6 +12,20 @@
 
 [hypervisor.firecracker]
 path = "/usr/local/bin/firecracker"
+kernel = "/usr/local/share/kata-containers/vmlinux.container"
+image = "/usr/local/share/kata-containers/kata-containers.img"
+
+# List of valid annotation names for the hypervisor
+# Each member of the list is a regular expression, which is the base name
+# of the annotation, e.g. "path" for io.katacontainers.config.hypervisor.path"
+enable_annotations = []
+
+# List of valid annotations values for the hypervisor
+# Each member of the list is a path pattern as described by glob(3).
+# The default if not set is empty (all annotations rejected.)
+# Your distribution recommends: 
+valid_hypervisor_paths = 
+
 # Path for the jailer specific to firecracker
 # If the jailer path is not set kata will launch firecracker
 # without a jail. If the jailer is set firecracker will be
@@ -19,8 +33,13 @@ path = "/usr/local/bin/firecracker"
 # This is disabled by default as additional setup is required
 # for this feature today.
 #jailer_path = "/usr/local/bin/jailer"
-kernel = "/usr/local/share/kata-containers/vmlinux.container"
-image = "/usr/local/share/kata-containers/kata-containers.img"
+
+# List of valid jailer path values for the hypervisor
+# Each member of the list can be a regular expression
+# The default if not set is empty (all annotations rejected.)
+# Your distribution recommends: ["/usr/local/bin/jailer"]
+valid_jailer_paths = ["/usr/local/bin/jailer"]
+
 
 # Optional space-separated list of options to pass to the guest kernel.
 # For example, use `kernel_params = "vsyscall=emulate"` if you are having
@@ -32,7 +51,7 @@ image = "/usr/local/share/kata-containers/kata-containers.img"
 # may stop the virtual machine from booting.
 # To see the list of default parameters, enable hypervisor debug, create a
 # container and look for 'default-kernel-parameters' log entries.
-kernel_params = ""
+kernel_params = "agent.debug_console agent.log=debug initcall_debug"
 
 # Default number of vCPUs per SB/VM:
 # unspecified or 0                --> will be set to 1
@@ -55,6 +74,7 @@ default_vcpus = 1
 # `default_maxvcpus = 8` the memory footprint will be small, but 8 will be the maximum number of
 # vCPUs supported by the SB/VM. In general, we recommend that you do not edit this variable,
 # unless you know what are you doing.
+# NOTICE: on arm platform with gicv2 interrupt controller, set it to 8.
 default_maxvcpus = 0
 
 # Bridges can be used to hot plug devices.
@@ -86,10 +106,10 @@ default_memory = 2048
 #memory_offset = 0
 
 # Disable block device from being used for a container's rootfs.
-# In case of a storage driver like devicemapper where a container's 
+# In case of a storage driver like devicemapper where a container's
 # root file system is backed by a block device, the block device is passed
-# directly to the hypervisor for performance reasons. 
-# This flag prevents the block device from being passed to the hypervisor, 
+# directly to the hypervisor for performance reasons.
+# This flag prevents the block device from being passed to the hypervisor,
 # 9pfs is used instead to pass the rootfs.
 disable_block_device_use = false
 
@@ -125,20 +145,25 @@ block_device_driver = "virtio-mmio"
 # Enabling this will result in the VM memory
 # being allocated using huge pages.
 # This is useful when you want to use vhost-user network
-# stacks within the container. This will automatically 
+# stacks within the container. This will automatically
 # result in memory pre allocation
 #enable_hugepages = true
+
+# Enable vIOMMU, default false
+# Enabling this will result in the VM having a vIOMMU device
+# This will also add the following options to the kernel's
+# command line: intel_iommu=on,iommu=pt
+#enable_iommu = true
 
 # Enable swap of vm memory. Default false.
 # The behaviour is undefined if mem_prealloc is also set to true
 #enable_swap = true
 
 # This option changes the default hypervisor and kernel parameters
-# to enable debug output where available. This extra output is added
-# to the proxy logs, but only when proxy debug is also enabled.
+# to enable debug output where available.
 # 
 # Default false
-#enable_debug = true
+enable_debug = true
 
 # Disable the customizations done in the runtime when it detects
 # that it is running on top a VMM. This will result in the runtime
@@ -149,11 +174,6 @@ block_device_driver = "virtio-mmio"
 # This is the msize used for 9p shares. It is the number of bytes 
 # used for 9p packet payload.
 #msize_9p = 8192
-
-# If true and vsocks are supported, use vsocks to communicate directly
-# with the agent (no proxy is started).
-# Default true
-use_vsock = true
 
 # VFIO devices are hotplugged on a bridge by default. 
 # Enable hotplugging on root bus. This may be required for devices with
@@ -190,6 +210,17 @@ use_vsock = true
 # Warnings will be logged if any error is encountered will scanning for hooks,
 # but it will not abort container execution.
 #guest_hook_path = "/usr/share/oci/hooks"
+#
+# Use rx Rate Limiter to control network I/O inbound bandwidth(size in bits/sec for SB/VM).
+# In Firecracker, it provides a built-in rate limiter, which is based on TBF(Token Bucket Filter)
+# queueing discipline.
+# Default 0-sized value means unlimited rate.
+#rx_rate_limiter_max_rate = 0
+# Use tx Rate Limiter to control network I/O outbound bandwidth(size in bits/sec for SB/VM).
+# In Firecracker, it provides a built-in rate limiter, which is based on TBF(Token Bucket Filter)
+# queueing discipline.
+# Default 0-sized value means unlimited rate.
+#tx_rate_limiter_max_rate = 0
 
 [factory]
 # VM templating support. Once enabled, new VMs are created from template
@@ -205,28 +236,10 @@ use_vsock = true
 # Default false
 #enable_template = true
 
-[shim.kata]
-path = "/usr/local/lib/kata-containers/kata-shim"
-
-# If enabled, shim messages will be sent to the system log
-# (default: disabled)
-#enable_debug = true
-
-# If enabled, the shim will create opentracing.io traces and spans.
-# (See https://www.jaegertracing.io/docs/getting-started).
-#
-# Note: By default, the shim runs in a separate network namespace. Therefore,
-# to allow it to send trace details to the Jaeger agent running on the host,
-# it is necessary to set 'disable_new_netns=true' so that it runs in the host
-# network namespace.
-#
-# (default: disabled)
-#enable_tracing = true
-
 [agent.kata]
 # If enabled, make the agent display debug-level messages.
 # (default: disabled)
-#enable_debug = true
+enable_debug = true
 
 # Enable agent tracing.
 #
@@ -262,6 +275,13 @@ path = "/usr/local/lib/kata-containers/kata-shim"
 #
 kernel_modules=[]
 
+# Enable debug console.
+
+# If enabled, user can connect guest OS running inside hypervisor
+# through "kata-runtime exec <sandbox-id>" command
+
+#debug_console_enabled = true
+
 [netmon]
 # If enabled, the network monitoring process gets started when the
 # sandbox is created. This allows for the detection of some additional
@@ -275,13 +295,13 @@ path = "/usr/local/lib/kata-containers/kata-netmon"
 
 # If enabled, netmon messages will be sent to the system log
 # (default: disabled)
-#enable_debug = true
+enable_debug = true
 
 [runtime]
 # If enabled, the runtime will log additional debug messages to the
 # system log
 # (default: disabled)
-#enable_debug = true
+enable_debug = true
 #
 # Internetworking model
 # Determines how the VM should be connected to the
@@ -325,17 +345,19 @@ disable_guest_seccomp=true
 
 # if enable, the runtime will add all the kata processes inside one dedicated cgroup.
 # The container cgroups in the host are not created, just one single cgroup per sandbox.
-# The sandbox cgroup is not constrained by the runtime
 # The runtime caller is free to restrict or collect cgroup stats of the overall Kata sandbox.
 # The sandbox cgroup path is the parent cgroup of a container with the PodSandbox annotation.
+# The sandbox cgroup is constrained if there is no container type annotation.
 # See: https://godoc.org/github.com/kata-containers/runtime/virtcontainers#ContainerType
 sandbox_cgroup_only=false
 
 # Enabled experimental feature list, format: ["a", "b"].
 # Experimental features are features not stable enough for production,
-# They may break compatibility, and are prepared for a big version bump.
+# they may break compatibility, and are prepared for a big version bump.
 # Supported experimental features:
-# 1. "newstore": new persist storage driver which breaks backward compatibility,
-#				expected to move out of experimental in 2.0.0.
 # (default: [])
 experimental=[]
+
+# If enabled, user can run pprof tools with shim v2 process through kata-monitor.
+# (default: false)
+# EnablePprof = true

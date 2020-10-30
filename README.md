@@ -71,7 +71,7 @@ Binaries/scripts (but not OCI images or Helm charts) listed below are expected t
 
 - [docker-volume-loopback](https://github.com/ashald/docker-volume-loopback) (when Docker root is running on a filesystem not supporting overlays)
 - [docker-registry-proxy](https://github.com/rpardini/docker-registry-proxy) (transparent proxy for caching OCI image layers)
-- [Kata Containers](https://github.com/kata-containers/runtime) (along with QEMU, haven't gotten other hypervisors to work yet)
+- [Kata Containers](https://github.com/kata-containers/runtime)
 
 ### Charts/software used, depending on component selection
 
@@ -89,11 +89,10 @@ Logical components are split into namespaces according to the following logic:
 
 ## Known issues
 
-- Kata Runtimes: while Firecracker and Cloud Hypervisor manifests exist, they might not work at this time
-- Kubedee: Kata not deployed into worker system containers
+- K3D: Kata doesn't work - sorry, use Kubedee
 - Kubedee: Registry proxy not deployed as an LXD container, making Docker a harder dependency than it genuinely needs to be
 - cluster-wide pod security policies are just awful
-- most likely inconsistent whitespace handling
+- most likely inconsistent whitespace handling, deal with it
 
 ## Legalese
 
