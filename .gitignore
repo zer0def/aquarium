@@ -1,5 +1,4 @@
 *-helmfile.yaml
 banzai-charts
 cowboysysop-charts
-docker-registry-proxy
 postgres-operator

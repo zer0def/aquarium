@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: alpine
+  labels:
+    app: alpine
+spec:
+  replicas: 2
+  serviceName: alpine
+  selector:
+    matchLabels:
+      app: alpine
+  template:
+    metadata:
+      labels:
+        app: alpine
+    spec:
+      containers:
+      - name: alpine
+        image: alpine:edge
+        command: ["/bin/sh", "-xec", "while true; do sleep 86400; done"]
+        volumeMounts:
+        - mountPath: /mnt
+          name: alpine-shared
+        - mountPath: /srv
+          name: alpine-perpod
+      volumes:
+      - name: alpine-shared
+        persistentVolumeClaim:
+          claimName: alpine-shared
+  volumeClaimTemplates:
+  - metadata:
+      name: alpine-perpod
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: rook-ceph-block
+      resources:
+        requests:
+          storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: alpine-shared
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: rook-cephfs
+  resources:
+    requests:
+      storage: 1Gi

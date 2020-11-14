@@ -8,4 +8,24 @@
 [submodule "istio"]
 	path = istio
 	url = https://github.com/istio/istio
-	branch = release-1.7
+	branch = release-1.8
+[submodule "docker-registry-proxy"]
+	path = docker-registry-proxy
+	url = https://github.com/rpardini/docker-registry-proxy
+	branch = master
+[submodule "openstack-helm-infra"]
+	path = openstack-helm-infra
+	url = https://opendev.org/openstack/openstack-helm-infra
+[submodule "openstack-helm"]
+	path = openstack-helm
+	url = https://opendev.org/openstack/openstack-helm
+[submodule "loci"]
+	path = loci
+	url = https://opendev.org/openstack/loci
+[submodule "nginx-ingress"]
+	path = nginx-ingress
+	url = https://github.com/nginxinc/kubernetes-ingress
+	branch = release-1.9
+[submodule "openstack-helm-images"]
+	path = openstack-helm-images
+	url = https://opendev.org/openstack/openstack-helm-images

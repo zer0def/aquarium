@@ -9,7 +9,7 @@ DEFAULT_WORKERS="$((4/$(nproc)))"
 [ "${DEFAULT_WORKERS}" -lt 1 ] && DEFAULT_WORKERS=1
 
 DEFAULT_PROXY_REGISTRIES=(
-  gcr.io quay.io "registry.opensource.zalan.do"
+  k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do"
 )
 
 HELMFILE_ARGS=()
@@ -144,6 +144,12 @@ registry_proxy_post::common(){
     -v "${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache" \
     -e "REGISTRIES=${REGISTRIES}" \
     -e "AUTH_REGISTRIES=${AUTH_REGISTRIES}" \
+    -e "ENABLE_MANIFEST_CACHE=true" \
+    -e 'MANIFEST_CACHE_PRIMARY_REGEX=.*' \
+    -e 'MANIFEST_CACHE_PRIMARY_TIME=6h' \
+    -e 'MANIFEST_CACHE_SECONDARY_REGEX=.*' \
+    -e 'MANIFEST_CACHE_SECONDARY_TIME=6h' \
+    -e 'MANIFEST_CACHE_DEFAULT_TIME=6h' \
     ${REGISTRY_PROXY_DOCKER_ARGS[@]} \
     "${REGISTRY_PROXY_REPO}" &>/dev/null
   docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> "${TARGET_FILE}"
@@ -356,7 +362,7 @@ launch_cluster::kubedee(){
 
   launch_cluster_post
 
-  [ "${RESTART_CRIO}" -eq 0 ] && for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
+  [ "${RESTART_CRIO}" -eq 0 ] && for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-(etcd|registry)$'); do
     lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
   done
   rm "${TMP_CRIO_CONF}"
@@ -414,7 +420,6 @@ install_dashboard(){
   kubectl apply -f "${MYDIR}/manifests/k8s-dashboard-cr.yml"
 }
 
-# we could be installing through K3S' `helm.cattle.io/v1` API (like in github.com/mrchrd/k3s-quickstart), but we shouldn't be making such assumptions
 setup_helm(){
   declare -A HELM_PLUGINS=(
     ['https://github.com/hypnoglow/helm-s3']="v0.9.2"
@@ -717,8 +722,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.19.3-k3s3}"
-    [kubedee]="${RUNTIME_TAG:-1.19.3}"
+    [k3d]="${RUNTIME_TAG:-1.19.4-k3s2}"
+    [kubedee]="${RUNTIME_TAG:-1.19.5}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
@@ -726,7 +731,7 @@ main(){
   : ${CLUSTER_CONFIG_HOST_PATH:=/var/tmp/k3s/${CLUSTER_NAME}}
 
   # registry proxy config
-  : ${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.4.1"}
+  : ${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.0"}
   REGISTRY_PROXY_DOCKER_ARGS=()
   : ${REGISTRY_PROXY_HOSTNAME:="${K8S_RUNTIME}-${CLUSTER_NAME}-registry-proxy-cache.local"}
   : ${REGISTRY_PROXY_HOST_PATH:=/var/tmp/oci-registry}
