@@ -1,4 +1,1 @@
-*-helmfile.yaml
-banzai-charts
-cowboysysop-charts
-postgres-operator
+trash/**

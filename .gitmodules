@@ -1,31 +1,30 @@
 [submodule "zer0def-charts"]
-	path = zer0def-charts
+	path = charts/zer0def
 	url = https://github.com/zer0def/charts
 	branch = kube-dev
 [submodule "kubedee"]
 	path = kubedee
 	url = https://github.com/zer0def/kubedee
 [submodule "istio"]
-	path = istio
+	path = charts/istio
 	url = https://github.com/istio/istio
 	branch = release-1.8
 [submodule "docker-registry-proxy"]
-	path = docker-registry-proxy
+	path = images/docker-registry-proxy
 	url = https://github.com/rpardini/docker-registry-proxy
 	branch = master
-[submodule "openstack-helm-infra"]
-	path = openstack-helm-infra
-	url = https://opendev.org/openstack/openstack-helm-infra
-[submodule "openstack-helm"]
-	path = openstack-helm
-	url = https://opendev.org/openstack/openstack-helm
-[submodule "loci"]
-	path = loci
-	url = https://opendev.org/openstack/loci
-[submodule "nginx-ingress"]
-	path = nginx-ingress
-	url = https://github.com/nginxinc/kubernetes-ingress
-	branch = release-1.9
 [submodule "openstack-helm-images"]
-	path = openstack-helm-images
-	url = https://opendev.org/openstack/openstack-helm-images
+	path = images/openstack-helm-images
+	url = https://github.com/zer0def/openstack-helm-images
+[submodule "openstack-helm-infra"]
+	path = charts/openstack-helm-infra
+	url = https://github.com/zer0def/openstack-helm-infra
+[submodule "openstack-helm"]
+	path = charts/openstack-helm
+	url = https://github.com/zer0def/openstack-helm
+[submodule "loci"]
+	path = images/loci
+	url = https://github.com/zer0def/loci
+[submodule "docker-powerdns"]
+	path = images/powerdns
+	url = https://github.com/NaPs/docker-powerdns

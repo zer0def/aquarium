@@ -2,11 +2,11 @@
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-functions" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
 {{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
-{{- $versions := dict "certManager" (default "0.15.1" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.1.1" (env "VERSIONS_HARBOR")) "istio" (default "1.8.1" (env "VERSIONS_ISTIO")) "jaeger" (default "1.21.2" (env "VERSIONS_JAEGER")) "openebs" (default "2.3.0" (env "VERSIONS_OPENEBS")) "openebsNdm" (default "1.0.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.8.2" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.17.2" (env "VERSIONS_THANOS")) -}}
+{{- $versions := dict "certManager" (default "1.1.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.1.3" (env "VERSIONS_HARBOR")) "istio" (default "1.8.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.21.2" (env "VERSIONS_JAEGER")) "openebs" (default "2.5.0" (env "VERSIONS_OPENEBS")) "openebsNdm" (default "1.1.1" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.8.2" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.17.2" (env "VERSIONS_THANOS")) -}}
 
-{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.5.0" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "clair" (dict "name" (default "harbor_clair" (env "HARBOR_DB_CLAIR_NAME")) "user" (default "harbor_clair" (env "HARBOR_DB_CLAIR_USER")) "pass" (default "harbor_clair" (env "HARBOR_DB_CLAIR_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
+{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.5.3" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "clair" (dict "name" (default "harbor_clair" (env "HARBOR_DB_CLAIR_NAME")) "user" (default "harbor_clair" (env "HARBOR_DB_CLAIR_USER")) "pass" (default "harbor_clair" (env "HARBOR_DB_CLAIR_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
 
-{{- $istioManifestBase := "./istio/manifests" -}}
+{{- $istioManifestBase := "./charts/istio/manifests" -}}
 
 {{- $kubePromStackChartVersion := "9.4.10" -}}
 
@@ -22,10 +22,6 @@
 {{- $thanosSidecarMTLSSecret := default "thanos-sidecar-mtls" (env "THANOS_SIDECAR_MTLS_SECRET") -}}
 
 repositories:
-- name: stable-deprecated
-  url: "https://kubernetes-charts.storage.googleapis.com"
-- name: incubator-deprecated
-  url: "https://kubernetes-charts-incubator.storage.googleapis.com"
 - name: stable
   url: "https://charts.helm.sh/stable"
 - name: incubator
@@ -38,9 +34,12 @@ repositories:
   url: "https://openebs.github.io/charts"
 - name: harbor  # src: https://github.com/goharbor/harbor-helm
   url: "https://helm.goharbor.io"
-# src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
-- name: nginx  # ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
+# ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
+- name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
   url: "https://helm.nginx.com/stable"
+# ref: https://kubernetes.github.io/ingress-nginx/user-guide/
+- name: kubernetes-nginx  # src: https://github.com/kubernetes/ingress-nginx/tree/master/charts/ingress-nginx
+  url: https://kubernetes.github.io/ingress-nginx
 - name: jetstack  # cert-manager
   url: "https://charts.jetstack.io"
 - name: rancher
@@ -72,6 +71,9 @@ helmDefaults:
   wait: true
   timeout: {{ $helmTimeout }}
   tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
 
 #bases: {}
 #helmFiles:
@@ -144,10 +146,61 @@ templates:
         imageTag: {{ $versions.openebsNdm }}
 
 releases:
+- name: {{ $releases.certManager }}
+  namespace: {{ $namespaces.network }}
+  chart: jetstack/cert-manager
+  version: v{{ $versions.certManager }}
+  values:
+  - installCRDs: true
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+{{- range $ns := values $namespaces }}
+      kubectl get ns {{ $ns }} || kubectl create ns {{ $ns }}
+{{- end }}
+      kubectl apply -f- <<EOF
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: selfsigned
+        namespace: kube-system
+      spec:
+        selfSigned: {}
+{{- range $ns := values $namespaces }}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: selfsigned-ca-tls
+        namespace: {{ $ns }}
+      spec:
+        secretName: selfsigned-ca-tls
+        isCA: true
+        commonName: "{{ $ns }}.svc.cluster.local"
+        dnsNames: ["{{ $ns }}.svc.cluster.local"]
+        issuerRef:
+          name: selfsigned
+          kind: ClusterIssuer
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Issuer
+      metadata:
+        name: selfsigned-ca
+        namespace: {{ $ns }}
+      spec:
+        ca:
+          secretName: selfsigned-ca-tls
+{{- end }}
+      EOF
+
 # network components
 - name: {{ $releases.jaegerOperator }}
   namespace: {{ $namespaces.network }}
   chart: jaegertracing/jaeger-operator
+  version: 2.18.0
   values:
   - fullnameOverride: {{ $releases.jaegerOperator | quote }}
     image:
@@ -305,7 +358,7 @@ releases:
       <<: *istioGlobal
     <<: *istioKiali
   {{- else }}
-  chart: ./kiali-server-1.27.0
+  chart: ./charts/kiali-server-1.27.0
   values:
   - {{ $istioManifestBase }}/addons/values-kiali.yaml
   {{- end }}
@@ -456,6 +509,9 @@ releases:
     defaultBucket:
       name: {{ $minio.defaultBucket | quote }}
       enabled: true
+    resources:
+      requests:
+        memory: 256Mi
   hooks:
   - events: ["postsync"]
     command: "/bin/sh"
@@ -488,21 +544,38 @@ releases:
       echo "MinIO is available under http://{{ $releases.minio }}.{{ $namespaces.storage }}.svc:{{ $minio.servicePort }} with access key \"{{ $minio.accessKey }}\", secret key \"{{ $minio.secretKey }}\" and default bucket \"{{ $minio.defaultBucket }}\"."
 - name: {{ $releases.patroni }}
   namespace: {{ $namespaces.storage }}
-  chart: ./zer0def-charts/incubator/patroni
+  chart: ./charts/zer0def/incubator/patroni
   needs:
   - {{ $namespaces.storage }}/{{ $releases.openebs }}
+  - {{ $namespaces.network }}/{{ $releases.certManager }}
   values:
   - fullnameOverride: {{ $releases.patroni | quote }}
-    replicaCount: 1
+    replicaCount: 2
     image:
       #repository: registry.opensource.zalan.do/acid/spilo-10
       #tag: 1.5-p5
       #repository: registry.opensource.zalan.do/acid/spilo-11
       #tag: 1.6-p1
-      repository: registry.opensource.zalan.do/acid/spilo-12
-      tag: 1.6-p5
+      #repository: registry.opensource.zalan.do/acid/spilo-12
+      #tag: 1.6-p5
+      repository: registry.opensource.zalan.do/acid/spilo-13
+      tag: 2.0-p2
     pgbouncer:
       replicaCount: 1
+      tls:
+        server:
+          issuerRef:
+            name: selfsigned-ca
+            kind: Issuer
+          sslmode: verify-full
+        client:
+          issuerRef:
+            name: selfsigned-ca
+            kind: Issuer
+    tls:
+      issuerRef:
+        name: selfsigned-ca
+        kind: Issuer
     databases:
     - name: {{ $harbor.db.core.name | quote }}
       user: {{ $harbor.db.core.user | quote }}
@@ -526,8 +599,14 @@ releases:
       ALLOW_NOSSL: "true"
     spiloConfiguration:
       bootstrap:
+        dcs:
+          synchronous_mode: true
+          synchronous_mode_count: 1
+          #synchronous_mode_strict: true
         initdb:
         - data-checksums
+        - locale: en_US.UTF-8
+        - encoding: UTF-8
 - name: {{ $releases.redis }}
   namespace: {{ $namespaces.storage }}
   chart: dandy-developer/redis-ha
@@ -740,7 +819,7 @@ releases:
 - name: {{ $releases.kubeless }}
   namespace: {{ $namespaces.serverless }}
   # should be installing upstream incubator/kubeless chart, but it's shit
-  chart: ./zer0def-charts/incubator/kubeless
+  chart: ./charts/zer0def/incubator/kubeless
   values:
   - nameOverride: {{ $releases.kubeless | quote }}
     rbac:
