@@ -78,7 +78,7 @@ Binaries/scripts (but not OCI images or Helm charts) listed below are expected t
 - [Helm](https://github.com/helm/helm)
 - [Helmfile](https://github.com/roboll/helmfile)
 - either of:
-    - [k3d](https://github.com/rancher/k3d) (prior to 3.0; so far, works with any [k3s](https://github.com/rancher/k3s) version)
+    - [k3d](https://github.com/rancher/k3d)
     - [kubedee](https://github.com/schu/kubedee) (along with [cfssl](https://github.com/cloudflare/cfssl), [jq](https://github.com/stedolan/jq) and [lxd](https://github.com/lxc/lxd))
 
 ### Optional dependencies (enabled by default!)

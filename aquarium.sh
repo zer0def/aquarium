@@ -37,7 +37,7 @@ create_volumes(){
   [ -n "${DOCKER_VOLUME_PLUGIN}" ] && install_docker_volume_plugin
   local VOLUME_NAME
   for i in $(seq 0 "${NUM_WORKERS}"); do
-    [ "${i}" -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    [ "${i}" -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
     docker volume create -d "${DOCKER_VOLUME_DRIVER}" "${VOLUME_NAME}" -o sparse=true -o fs=ext4 -o size=20GiB &>/dev/null
     K3D_OPTS+=('-v' "${VOLUME_NAME}:/var/lib/rancher/k3s@${VOLUME_NAME}")
     if [ "${OLD_K3S}" -ne 0 ]; then
@@ -79,9 +79,9 @@ registry_proxy_pre::k3d(){
   mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
   && docker run --entrypoint '' --rm "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" cat /etc/ssl/certs/ca-certificates.crt > "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt" \
   && K3D_OPTS+=(
-    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
-    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
-    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
+    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agent[*]"    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@server[*]"
+    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agent[*]"   '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@server[*]"
+    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@agent[*]" '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@server[*]"
     '-v' "${CLUSTER_CONFIG_HOST_PATH}/ssl:/etc/ssl/certs"
   )
 }
@@ -187,10 +187,10 @@ check_zfs(){
 }
 
 launch_cluster::k3d(){
-  [ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--server-arg' '--disable=local-storage')
-  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && K3D_OPTS+=(
-    '--server-arg' '--disable=traefik'
-    '--server-arg' '--disable=servicelb'
+  [ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--k3s-server-arg' '--disable=local-storage')
+  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && K3D_OPTS+=('--no-lb'
+    '--k3s-server-arg' '--disable=traefik'
+    '--k3s-server-arg' '--disable=servicelb'
   )
 
   # base containerd config
@@ -251,29 +251,29 @@ EOF
   echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' && create_volumes ||:
 
   # enable RuntimeClass admission controller?: https://kubernetes.io/docs/concepts/containers/runtime-class/
-  k3d c -t 0 \
-    -n "${CLUSTER_NAME}" \
-    -w "${NUM_WORKERS}" \
-    -a "$((6443+${RANDOM}%100))" \
-    --agent-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
-    --agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
-    --server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --server-arg '--kube-apiserver-arg=enable-admission-plugins=PodSecurityPolicy,NodeRestriction' \
+  k3d cluster create "${CLUSTER_NAME}" --wait \
+    -s 1 -a "${NUM_WORKERS}" \
+    --api-port "$((6443+${RANDOM}%100))" \
+    --k3s-agent-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
+    --k3s-agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
+    --k3s-server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
+    --k3s-server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
+    --k3s-server-arg '--kube-apiserver-arg=enable-admission-plugins=PodSecurityPolicy,NodeRestriction' \
     -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
     -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
-  export KUBECONFIG="$(k3d get-kubeconfig -n "${CLUSTER_NAME}")"
+  export KUBECONFIG="$(k3d kubeconfig write "${CLUSTER_NAME}")"
   launch_cluster_post
 
   echo "Waiting for k3s cluster to come up…"
-  until kubectl wait --for condition=ready node "k3d-${CLUSTER_NAME}-server"; do sleep 1; done 2>/dev/null
-  for i in $(seq "${NUM_WORKERS}"); do
-    if [ "${INSTALL_KATA}" -eq 0 ]; then
-      [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
-      docker exec "${NODE_NAME}" /bin/sh -c 'mkdir -p /run/kata-containers/shared/sandboxes; mount --bind --make-rshared /run/kata-containers/shared/sandboxes /run/kata-containers/shared/sandboxes'
-    fi
-    until kubectl wait --for condition=ready node "k3d-${CLUSTER_NAME}-worker-$((${i}-1))"; do sleep 1; done 2>/dev/null
+  until kubectl wait --for condition=ready node "${K8S_RUNTIME}-${CLUSTER_NAME}-server-0"; do sleep 1; done 2>/dev/null
+  for i in $(seq 0 "$((${NUM_WORKERS}-1))"); do
+    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
+    #if [ "${INSTALL_KATA}" -eq 0 ]; then
+    #  docker exec "${NODE_NAME}" /bin/sh -c 'mkdir -p /run/kata-containers/shared/sandboxes; mount --bind --make-rshared /run/kata-containers/shared/sandboxes /run/kata-containers/shared/sandboxes'
+    #fi
+
+    until kubectl wait --for condition=ready node "${NODE_NAME}"; do sleep 1; done 2>/dev/null
   done
 
   [ "${OLD_K3S}" -eq 0 ] || until kubectl -n kube-system wait --for condition=available deploy metrics-server; do sleep 1; done 2>/dev/null
@@ -317,13 +317,10 @@ launch_cluster::kubedee(){
 
 launch_cluster(){
   [ "${K8S_RUNTIME}" = "k3d" ] && mkdir -p "${CLUSTER_CONFIG_HOST_PATH}/ssl"
-  [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && K3D_OPTS+=(
-    '--registry-name' "${LOCAL_REGISTRY_HOST:=registry.local}"
-    '--registry-port' "${LOCAL_REGISTRY_PORT:=5000}"
-    '--enable-registry'
-    #'--registry-volume' 'k3d-registry' '--enable-registry-cache'
-  ) && KUBEDEE_OPTS+=('--enable-insecure-registry') \
-  && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
+  [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] \
+    && K3D_OPTS+=('--registry-create') \
+    && KUBEDEE_OPTS+=('--enable-insecure-registry') \
+    && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
 
   [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_pre
 
@@ -335,7 +332,7 @@ launch_cluster(){
 }
 
 teardown_cluster::k3d(){
-  k3d d --prune -n "${CLUSTER_NAME}" ||:
+  k3d cluster delete "${CLUSTER_NAME}" ||:
   rm -rf "${CLUSTER_CONFIG_HOST_PATH}" ||:
   echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' || [ "$(docker info -f '{{.Driver}}')" = "zfs" ] && docker volume rm -f $(docker volume ls --format '{{.Name}}' | awk "/^${K8S_RUNTIME}-${CLUSTER_NAME}-/") &>/dev/null ||:
 }
@@ -404,7 +401,7 @@ install_service_mesh(){
   # Disables Citadel's SA secret generation for the namespace (unless `security.enableNamespacesByDefault` is already `false` and therefore opt-in)
   #kubectl label ns default ca.istio.io/override=false
 
-  export ENABLE_NETWORK=1 \
+  export \
     RELEASES_ISTIO_INIT="${RELEASES_ISTIO_INIT:-istio-init}" \
     RELEASES_ISTIO="${RELEASES_ISTIO:-istio}" \
     RELEASES_JAEGER_OPERATOR="${RELEASES_JAEGER_OPERATOR:-jaeger-operator}" \
@@ -435,7 +432,7 @@ install_openebs(){
   #OPENEBS_OMIT_LOOPDEVS="$(string_join , $(losetup -nlO NAME))"
 
   [ "${K8S_RUNTIME}" = "k3d" ] && for i in $(seq 0 "${NUM_WORKERS}"); do
-    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
     docker exec "${NODE_NAME}" mkdir -p /run/udev
   done
   export RELEASES_OPENEBS="${RELEASES_OPENEBS:-openebs}"
@@ -492,7 +489,7 @@ install_serverless(){
 show_ingress_points::k3d(){
   local NODE_NAME
   for i in $(seq 0 "${NUM_WORKERS}"); do
-    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-worker-$((${i}-1))"
+    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
     docker container inspect "${NODE_NAME}" -f "{{(index .NetworkSettings.Networks \"${K8S_RUNTIME}-${CLUSTER_NAME}\").IPAddress}}"
   done
 }
@@ -597,7 +594,7 @@ main(){
   : ${INSTALL_MONITORING:=0}
   : ${INSTALL_SERVERLESS:=0}
 
-  : ${K8S_RUNTIME:=kubedee}
+  : ${K8S_RUNTIME:=k3d}
   : ${CLUSTER_NAME:=k3s-default}
   : ${NUM_WORKERS:=${DEFAULT_WORKERS}}
   : ${LXD_STORAGE_POOL:=default}
@@ -638,7 +635,7 @@ main(){
       -r | --runtime)
         K8S_RUNTIME="${2}"
         case "${2}" in
-          kubedee) ;;
+          k3d | kubedee) ;;
           *)
             echo "Unexpected runtime provided"
             exit 1

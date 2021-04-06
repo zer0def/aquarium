@@ -489,8 +489,10 @@ releases:
       monitoring:
         <<: *openebsTag
     ndmOperator:
+      enabled: false
       <<: *openebsNdmTag
     ndm:
+      enabled: false
       <<: *openebsNdmTag
       filters:
         excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}"
