@@ -1,28 +1,17 @@
 #!/bin/bash -e
-[ "${SCRIPT_DEBUG:=1}" -eq 0 ] && set -x && export KUBEDEE_DEBUG=1
+MYDIR="$(dirname "$(readlink -f "${0}")")"
+. "${MYDIR}/common"
 
 # inb4 someone comes out yelling they don't have coreutils installed
-BINARY_DEPENDENCIES=(docker helm helmfile kubectl)
+BINARY_DEPENDENCIES=(docker "${HELM_BIN}" helmfile kubectl)
 
 # currently installed resources' requests have a hard time fitting on sub-quad-thread machines
 DEFAULT_WORKERS="$((4/$(nproc)))"
 [ "${DEFAULT_WORKERS}" -lt 1 ] && DEFAULT_WORKERS=1
 
-DEFAULT_PROXY_REGISTRIES=(
-  ghcr.io k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do"
-)
-
-KUBE_NOPROXY_SETTING=(
-  '.cluster.local' '.svc'
-#  '192.168.0.0/16' '172.16.0.0/12' '10.0.0.0/8'
-)
-
 K3D_OPTS=()
 KUBEDEE_OPTS=()
 RESTART_CRIO=1
-MYDIR="$(dirname "$(readlink -f "${0}")")"
-
-string_join() { local IFS="$1"; shift; echo "$*"; }
 
 install_docker_volume_plugin(){
   local PLUGIN_LS_OUT="$(docker plugin ls --format '{{.Name}},{{.Enabled}}' | grep -E "^${DOCKER_VOLUME_PLUGIN}")"
@@ -94,69 +83,11 @@ registry_proxy_pre(){
   "registry_proxy_pre::${K8S_RUNTIME}"
 }
 
-registry_proxy_post::common(){
-  local REGISTRIES="${PROXY_REGISTRIES:=${DEFAULT_PROXY_REGISTRIES[@]}}" AUTH_REGISTRIES="${PROXY_REGISTRIES_AUTH}" TARGET_FILE="${1}"
-  docker run -d \
-    --name "${REGISTRY_PROXY_HOSTNAME}" \
-    -v "${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache" \
-    -e "REGISTRIES=${REGISTRIES}" \
-    -e "AUTH_REGISTRIES=${AUTH_REGISTRIES}" \
-    -e "ENABLE_MANIFEST_CACHE=true" \
-    -e 'MANIFEST_CACHE_PRIMARY_REGEX=.*' \
-    -e 'MANIFEST_CACHE_PRIMARY_TIME=6h' \
-    -e 'MANIFEST_CACHE_SECONDARY_REGEX=.*' \
-    -e 'MANIFEST_CACHE_SECONDARY_TIME=6h' \
-    -e 'MANIFEST_CACHE_DEFAULT_TIME=6h' \
-    ${REGISTRY_PROXY_DOCKER_ARGS[@]} \
-    "${REGISTRY_PROXY_REPO}" &>/dev/null
-  docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> "${TARGET_FILE}"
-}
-
 registry_proxy_post::k3d(){
   # arguably common part start
   REGISTRY_PROXY_DOCKER_ARGS+=('--network' "k3d-${CLUSTER_NAME}")
-  registry_proxy_post::common "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt"
+  registry_proxy_post::shared "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt"
   # arguably common part end
-}
-
-registry_proxy_post::kubedee(){
-  local TMP_CA="$(mktemp)" TMP_CRIO_CONF="$(mktemp)" \
-    CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
-    #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
-  lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
-  chmod u+w "${TMP_CA}"
-  mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
-
-  #lxc file pull kubedee-${CLUSTER_NAME}-controller/etc/crio/crio.conf "${TMP_CRIO_CONF}"
-  #sed -i 's/^\(#[[:space:]]*\)\?storage_driver[[:space:]]*=.*/storage_driver = "zfs"/' "${TMP_CRIO_CONF}"
-
-  ## rsync somehow ducks up
-  # sysctl -w kernel.unprivileged_userns_clone=1
-  # lxc-create -t oci -n a1 -- --dhcp -u docker://docker.io/${REGISTRY_PROXY_REPO}
-  # lxc-start -n a1
-
-  ## remove '^lxc.(init|execute)' from lxc container config
-  ## might not be possible to migrate this to lxd
-  # lxc-to-lxd --rsync-args '-zz' --containers a1
-  # lxc delete -f a1
-
-  registry_proxy_post::common "${TMP_CA}"
-
-  local REGISTRY_PROXY_ADDRESS="$(docker container inspect "${REGISTRY_PROXY_HOSTNAME}" -f '{{.NetworkSettings.IPAddress}}')" TMP_SYSTEMD_SVC="$(mktemp)"
-  cat <<EOF >"${TMP_SYSTEMD_SVC}"
-[Service]
-Environment="HTTP_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
-Environment="HTTPS_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
-Environment="NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
-EOF
-
-  for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
-    lxc file push "${TMP_CA}" "${i}${CACERT_PATH}"
-    lxc file push "${TMP_SYSTEMD_SVC}" "${i}/etc/systemd/system/crio.service.d/registry-proxy.conf" -p
-    RESTART_CRIO=0
-  done
-
-  rm "${TMP_CA}" "${TMP_SYSTEMD_SVC}" "${TMP_CRIO_CONF}"
 }
 
 registry_proxy_post(){
@@ -176,7 +107,7 @@ launch_cluster_post(){
   until kubectl apply -f "${TMP_PSP}" &>/dev/null; do :; done
   rm "${TMP_PSP}"
 
-  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post
+  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post ||:
 }
 
 check_zfs(){
@@ -187,7 +118,7 @@ check_zfs(){
 }
 
 launch_cluster::k3d(){
-  [ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--k3s-server-arg' '--disable=local-storage')
+  #[ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--k3s-server-arg' '--disable=local-storage')
   [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && K3D_OPTS+=('--no-lb'
     '--k3s-server-arg' '--disable=traefik'
     '--k3s-server-arg' '--disable=servicelb'
@@ -316,17 +247,24 @@ launch_cluster::kubedee(){
 }
 
 launch_cluster(){
-  [ "${K8S_RUNTIME}" = "k3d" ] && mkdir -p "${CLUSTER_CONFIG_HOST_PATH}/ssl"
+  if [ "${K8S_RUNTIME}" = "k3d" ]; then
+    mkdir -p "${CLUSTER_CONFIG_HOST_PATH}/ssl"
+    [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && KUBE_NOPROXY_SETTING+=("k3d-${CLUSTER_NAME}-registry") ||:
+    LOCAL_REGISTRY_HOST="k3d-${CLUSTER_NAME}-registry" LOCAL_REGISTRY_PORT=5000
+  else
+    [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && KUBE_NOPROXY_SETTING+=(
+      "kubedee-${CLUSTER_NAME}-registry" "registry.local"
+    ) ||:
+    LOCAL_REGISTRY_HOST="registry.local" LOCAL_REGISTRY_PORT=5000
+  fi
   [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] \
     && K3D_OPTS+=('--registry-create') \
-    && KUBEDEE_OPTS+=('--enable-insecure-registry') \
-    && KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}") ||:
+    && KUBEDEE_OPTS+=('--enable-insecure-registry') ||:
 
-  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_pre
+  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_pre ||:
 
   "launch_cluster::${K8S_RUNTIME}"
 
-  #[ "${K8S_RUNTIME}" = "kubedee" ] && kubectl apply -f "${MYDIR}/utils/manifests/kata-runtime-classes.yml" ||:
   [ "${K8S_RUNTIME}" = "k3d" ] && kubectl apply -f "${MYDIR}/utils/manifests/k3d-syslogd.yml" \
     && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
 }
@@ -342,9 +280,8 @@ teardown_cluster::kubedee(){
 }
 
 install_dashboard(){
-  # https://www.artificialworlds.net/blog/2012/10/17/bash-associative-array-examples/
   declare -A K8S_DASHBOARD=(
-    [v1.20]="v2.1.0"
+    [v1.20]="v2.2.0"
     [v1.19]="v2.0.5"
     [v1.18]="v2.0.3"
     [v1.17]="v2.0.0-rc7"
@@ -363,30 +300,6 @@ install_dashboard(){
   kubectl apply -f "${MYDIR}/utils/manifests/k8s-dashboard-cr.yml"
 }
 
-setup_helm(){
-  declare -A HELM_PLUGINS=(
-    ['https://github.com/hypnoglow/helm-s3']="v0.9.2"
-    ['https://github.com/zendesk/helm-secrets']="v2.0.2"
-    ['https://github.com/aslafy-z/helm-git']="v0.8.1"
-    ['https://github.com/databus23/helm-diff']="v3.1.3"
-    ['https://github.com/hayorov/helm-gcs']="0.3.6"
-  )
-  helm version --template '{{.Version}}' | grep -E '^v3\.' || TILLER_SERVICE_ACCOUNT="tiller"
-  # Helm v2: `helm version -c --template '{{.Client.SemVer}}'`
-  [ -n "${TILLER_SERVICE_ACCOUNT}" ] && HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3" && install_tiller
-
-  echo "Installing Helm plugins…"
-  for i in "${!HELM_PLUGINS[@]}"; do helm plugin install "${i}" --version "${HELM_PLUGINS[${i}]}" ||:; done
-}
-
-install_tiller(){
-  echo "Installing Tiller…"
-  TILLER_SERVICE_ACCOUNT="${TILLER_SERVICE_ACCOUNT}" envsubst <"${MYDIR}/utils/manifests/tiller-cluster-admin.yml.shtpl" | kubectl apply -f-
-
-  helm init --upgrade --service-account "${TILLER_SERVICE_ACCOUNT}"
-  until kubectl -n kube-system wait --for condition=available deploy tiller-deploy; do sleep 1; done 2>/dev/null
-}
-
 install_service_mesh(){
   kubectl get ns "${NAMESPACES_NETWORK}" &>/dev/null || kubectl create ns "${NAMESPACES_NETWORK}"
   echo "Installing Istio Resources…"
@@ -401,7 +314,7 @@ install_service_mesh(){
   # Disables Citadel's SA secret generation for the namespace (unless `security.enableNamespacesByDefault` is already `false` and therefore opt-in)
   #kubectl label ns default ca.istio.io/override=false
 
-  export \
+  export ENABLE_NETWORK=1 \
     RELEASES_ISTIO_INIT="${RELEASES_ISTIO_INIT:-istio-init}" \
     RELEASES_ISTIO="${RELEASES_ISTIO:-istio}" \
     RELEASES_JAEGER_OPERATOR="${RELEASES_JAEGER_OPERATOR:-jaeger-operator}" \
@@ -522,7 +435,7 @@ kube_up(){
   [ "${INSTALL_SERVERLESS}" -eq 0 ] && install_serverless
 
   # apply helm releases
-  helmfile --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
+  [ -n "${OMIT_HELMFILE}" ] || helmfile -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
 
   show_ingress_points
   echo "Now run \"kubectl proxy\" and go to http://127.0.0.1:8001/api/v1/namespaces/kubernetes-dashboard/services/http%3Akubernetes-dashboard%3A/proxy/ for your K8S dashboard."
@@ -594,14 +507,14 @@ main(){
   : ${INSTALL_MONITORING:=0}
   : ${INSTALL_SERVERLESS:=0}
 
-  : ${K8S_RUNTIME:=k3d}
+  : ${K8S_RUNTIME:=kubedee}
   : ${CLUSTER_NAME:=k3s-default}
   : ${NUM_WORKERS:=${DEFAULT_WORKERS}}
   : ${LXD_STORAGE_POOL:=default}
 
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
-  : ${WORKER_MEMORY_SIZE:=4GiB}
-  : ${ROOTFS_SIZE:=20GiB}
+  : ${WORKER_MEMORY_SIZE:=8GiB}
+  : ${ROOTFS_SIZE:=30GiB}
 
   while [ "${#}" -gt 0 ]; do
     case "${1}" in
@@ -616,10 +529,6 @@ main(){
         COMPONENT="${COMPONENT//-/_}"
         declare INSTALL_${COMPONENT^^}=0
         shift
-        ;;
-      -N | --name)
-        CLUSTER_NAME="${2}"
-        shift 2
         ;;
       -n | --num)
         case "${2}" in
@@ -643,38 +552,19 @@ main(){
         esac
         shift 2
         ;;
-      -t | --tag)
-        RUNTIME_TAG="${2}"
-        shift 2
-        ;;
-      -s | --storage-pool)
-        LXD_STORAGE_POOL="${2}"
-        shift 2
-        ;;
-      --vm)
-        VM_MODE="--vm"
-        shift
-        ;;
-      -c | --controller-mem)
-        CONTROLLER_MEMORY_SIZE="${2}"
-        shift 2
-        ;;
-      -w | --worker-mem)
-        WORKER_MEMORY_SIZE="${2}"
-        shift 2
-        ;;
-      -R | --rootfs-size)
-        ROOTFS_SIZE="${2}"
-        shift 2
-        ;;
-      up | down)
-        SCRIPT_OP="${1}"
-        shift
-        ;;
+      -N | --name) CLUSTER_NAME="${2}"; shift 2;;
+      -t | --tag) RUNTIME_TAG="${2}"; shift 2;;
+      -s | --storage-pool) LXD_STORAGE_POOL="${2}"; shift 2;;
+      --vm) VM_MODE="--vm"; shift;;
+      -c | --controller-mem) CONTROLLER_MEMORY_SIZE="${2}"; shift 2;;
+      -w | --worker-mem) WORKER_MEMORY_SIZE="${2}"; shift 2;;
+      -R | --rootfs-size) ROOTFS_SIZE="${2}"; shift 2;;
+      up | down) SCRIPT_OP="${1}"; shift;;
       *) usage;;
     esac
   done
 
+  export K8S_RUNTIME
   [ -z "${SCRIPT_OP}" ] && usage
 
   KUBEDEE_OPTS+=("${VM_MODE}"
@@ -698,8 +588,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.20.5-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.20.5}"
+    [k3d]="${RUNTIME_TAG:-1.21.1-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.21.1}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
@@ -707,7 +597,6 @@ main(){
   : ${CLUSTER_CONFIG_HOST_PATH:=/var/tmp/k3s/${CLUSTER_NAME}}
 
   # registry proxy config
-  : ${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.3"}
   REGISTRY_PROXY_DOCKER_ARGS=()
   : ${REGISTRY_PROXY_HOSTNAME:="${K8S_RUNTIME}-${CLUSTER_NAME}-registry-proxy-cache.local"}
   : ${REGISTRY_PROXY_HOST_PATH:=/var/tmp/oci-registry}

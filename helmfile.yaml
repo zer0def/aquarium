@@ -1,12 +1,14 @@
 {{- $helmTimeout := default 86400 (env "HELM_TIMEOUT") -}}
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-fn" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "serverlessBuild" (default "serverless-bld" (env "NAMESPACES_SERVERLESS_BUILD")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
-{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
-{{- $versions := dict "certManager" (default "1.1.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.2.1" (env "VERSIONS_HARBOR")) "istio" (default "1.9.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.22.0" (env "VERSIONS_JAEGER")) "openebs" (default "2.7.0" (env "VERSIONS_OPENEBS")) "openebsNdm" (default "1.3.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.8.4" (env "VERSIONS_PROMETHEUS_ADAPTER")) "thanos" (default "0.19.0" (env "VERSIONS_THANOS")) -}}
+{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "ingressController" (default "nginx-ingress" (env "RELEASES_INGRESS_CONTROLLER")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "sentry" (default "sentry" (env "RELEASES_SENTRY")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
+{{- $versions := dict "certManager" (default "1.1.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.2.2" (env "VERSIONS_HARBOR")) "istio" (default "1.9.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.22.1" (env "VERSIONS_JAEGER")) "openebs" (default "2.9.0" (env "VERSIONS_OPENEBS")) "openebsNdm" (default "1.3.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.8.4" (env "VERSIONS_PROMETHEUS_ADAPTER")) "sentry" (default "21.5.1" (env "VERSIONS_SENTRY")) "thanos" (default "0.20.2" (env "VERSIONS_THANOS")) -}}
 
-{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.6.1" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
+{{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.6.2" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
 
 {{- $istioManifestBase := "./charts/istio/manifests" -}}
+
+{{- $k8sRuntime := default "" (env "K8S_RUNTIME") -}}
 
 {{- $kong := dict "db" (dict "user" (default "kong" (env "KONG_DB_USER")) "pass" (default "kong" (env "KONG_DB_PASS")) "name" (default "kong" (env "KONG_DB_NAME"))) }}
 {{- $kubePromStackChartVersion := "9.4.10" -}}
@@ -18,7 +20,13 @@
   {{- $openebsOmitLoopDevs = printf ",%s" $openebsOmitLoopDevs -}}
 {{- end -}}
 
-{{- $redis := dict "password" (default "redis" (env "REDIS_PASSWORD")) "ports" (dict "readwrite" (default "6379" (env "REDIS_PORT")) "readonly" (default "6380" (env "REDIS_PORT_READONLY")) "sentinel" (default "26379" (env "REDIS_PORT_SENTINEL"))) -}}
+{{- $patroni := dict "replicas" 1 "bouncers" 1 "image" "registry.opensource.zalan.do/acid/spilo-13" "tag" "2.0-p7" }}
+{{- $patroniHashedName := printf "%s-%s" $releases.patroni (printf "%s:%s" $patroni.image $patroni.tag | sha256sum | trunc 8) }}
+
+{{- $redis := dict "password" (default "redis" (env "REDIS_PASSWORD")) "ports" (dict "readwrite" (default "6379" (env "REDIS_PORT")) "readonly" (default "6380" (env "REDIS_PORT_READONLY")) "sentinel" (default "26379" (env "REDIS_PORT_SENTINEL"))) "replicas" (dict "redis" (int (default "3" (env "REDIS_REPLICAS"))) "haproxy" (int (default "1" (env "REDIS_HAPROXY_REPLICAS")))) -}}
+
+{{- $sentry := dict "admin" (dict "user" "admin@sentry.local" "password" "sentry") "db" (dict "name" "sentry" "user" "sentry" "pass" "sentry") -}}
+
 {{- $thanosObjstoreConfig := dict "secret" (default "thanos-objstore-config" (env "THANOS_OBJSTORE_CONFIG_SECRET")) "filename" (default "object-store.yaml" (env "THANOS_OBJSTORE_CONFIG_FILENAME")) -}}
 {{- $thanosSidecarMTLSSecret := default "thanos-sidecar-mtls" (env "THANOS_SIDECAR_MTLS_SECRET") -}}
 
@@ -38,6 +46,8 @@ repositories:
   url: "https://kubernetes-charts.banzaicloud.com"
 - name: rancher
   url: "https://releases.rancher.com/server-charts/latest"
+- name: sentry
+  url: "https://sentry-kubernetes.github.io/charts"
 
 ## storage
 - name: openebs
@@ -170,6 +180,22 @@ templates:
         imageTag: {{ $versions.openebsNdm }}
 
 releases:
+{{- if ne $k8sRuntime "k3d" }}
+- name: {{ $releases.ingressController }}
+  namespace: {{ $namespaces.network }}
+  chart: nginx/nginx-ingress
+  #chart: kubernetes-nginx/ingress-nginx
+  labels:
+    purpose: ingress
+  values:
+  - controller:
+      hostNetwork: false
+      kind: daemonset
+      service:
+        type: NodePort
+      enableCustomResources: false
+      setAsDefaultIngress: true
+{{- end }}
 - name: {{ $releases.certManager }}
   namespace: {{ $namespaces.network }}
   chart: jetstack/cert-manager
@@ -297,8 +323,8 @@ releases:
   {{- end }}
   - global:
       <<: *istioGlobal
-    base:  # helm2
-      enableCRDTemplates: true
+    #base:  # helm2
+    #  enableCRDTemplates: true
 - name: {{ $releases.istio.control }}
   namespace: {{ $namespaces.network }}
   chart: {{ $istioManifestBase }}/charts/istio-control/istio-discovery
@@ -409,7 +435,7 @@ releases:
       <<: *istioGlobal
     <<: *istioKiali
   {{- else }}
-  chart: ./charts/kiali-server-1.29.0
+  chart: ./charts/kiali-server-1.34.1
   values:
   - {{ $istioManifestBase }}/addons/values-kiali.yaml
   {{- end }}
@@ -442,6 +468,7 @@ releases:
 {{- end }}
 
 ## storage components
+{{- if ne $k8sRuntime "k3d" }}
 - name: {{ $releases.openebs }}
   namespace: {{ $namespaces.storage }}
   chart: openebs/openebs
@@ -462,6 +489,7 @@ releases:
       <<: *openebsTag
     localprovisioner:
       enabled: true
+      replicas: 3
       <<: *openebsTag
     snapshotOperator:  # not needed for just local PV
       <<: *openebsLVP
@@ -550,13 +578,16 @@ releases:
       #        value: "device"
       EOF
 {{- end }}
+{{- end }}
 - name: {{ $releases.minio }}
   namespace: {{ $namespaces.storage }}
   chart: minio/minio
   version: {{ $minio.chartVersion }}
   installed: {{ and $enables.storage $enables.minio }}
+{{- if ne $k8sRuntime "k3d" }}
   needs:
   - {{ $namespaces.storage }}/{{ $releases.openebs }}
+{{- end }}
   values:
   - fullnameOverride: {{ $releases.minio | quote }}
     accessKey: {{ $minio.accessKey | quote }}
@@ -604,16 +635,19 @@ releases:
       kubectl -n {{ $namespaces.storage }} exec $(kubectl -n {{ $namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.app==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc "mc config host add minio http://{{ $releases.minio }}.{{ $namespaces.storage }}.svc:{{ $minio.servicePort }} {{ $minio.accessKey }} {{ $minio.secretKey }}"
       echo "MinIO is available under http://{{ $releases.minio }}.{{ $namespaces.storage }}.svc:{{ $minio.servicePort }} with access key \"{{ $minio.accessKey }}\", secret key \"{{ $minio.secretKey }}\" and default bucket \"{{ $minio.defaultBucket }}\"."
 {{- end }}
+
 - name: {{ $releases.patroni }}
   namespace: {{ $namespaces.storage }}
   chart: ./charts/zer0def/incubator/patroni
   installed: {{ $enables.storage }}
   needs:
+{{- if ne $k8sRuntime "k3d" }}
   - {{ $namespaces.storage }}/{{ $releases.openebs }}
+{{- end }}
   - {{ $namespaces.network }}/{{ $releases.certManager }}
   values:
   - fullnameOverride: {{ $releases.patroni | quote }}
-    replicaCount: 2
+    replicaCount: {{ $patroni.replicas }}
     image:
       #repository: registry.opensource.zalan.do/acid/spilo-10
       #tag: 1.5-p5
@@ -621,10 +655,10 @@ releases:
       #tag: 1.6-p1
       #repository: registry.opensource.zalan.do/acid/spilo-12
       #tag: 1.6-p5
-      repository: registry.opensource.zalan.do/acid/spilo-13
-      tag: 2.0-p6
+      repository: {{ $patroni.image }}
+      tag: {{ $patroni.tag }}
     pgbouncer:
-      replicaCount: 1
+      replicaCount: {{ $patroni.bouncers }}
       tls:
         server:
           issuerRef:
@@ -639,6 +673,57 @@ releases:
       issuerRef:
         name: selfsigned-ca
         kind: Issuer
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: "kubernetes.io/hostname"
+            namespaceSelector: {}
+            labelSelector:
+              matchLabels:
+                release: {{ $patroniHashedName }}
+    env:
+      ALLOW_NOSSL: "true"
+    spiloConfiguration:
+      bootstrap:
+        dcs:
+          synchronous_mode: true
+          #synchronous_mode_strict: true
+          synchronous_node_count: {{ sub $patroni.replicas 1 }}
+{{/*          # works, but not for cluster-related slots
+          slots:
+            #asdf:
+            #  type: physical
+{{- range untilStep 0 (int (sub $patroni.replicas 1)) 1 }}
+            {{ printf "%s-%s" $patroniHashedName (toString .) | replace "-" "_" | quote }}:
+              type: physical
+{{- end }}
+*/}}
+        initdb:
+        - data-checksums
+        - locale: en_US.UTF-8
+        - encoding: UTF-8
+      postgresql:
+        use_slots: true
+        parameters:
+          log_destination: stderr
+          logging_collector: "off"
+    metrics:
+      postgresql:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+      patroni:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
     databases:
     - name: {{ $harbor.db.core.name | quote }}
       user: {{ $harbor.db.core.user | quote }}
@@ -656,35 +741,27 @@ releases:
     - name: {{ $kong.db.name | quote }}
       user: {{ $kong.db.user | quote }}
       pass: {{ $kong.db.pass | quote }}
-    env:
-      ALLOW_NOSSL: "true"
-    spiloConfiguration:
-      bootstrap:
-        dcs:
-          synchronous_mode: true
-          #synchronous_mode_strict: true
-          synchronous_node_count: 1
-        initdb:
-        - data-checksums
-        - locale: en_US.UTF-8
-        - encoding: UTF-8
-      postgresql:
-        parameters:
-          log_destination: stderr
-          logging_collector: "off"
+    - name: {{ $sentry.db.name | quote }}
+      user: {{ $sentry.db.user | quote }}
+      pass: {{ $sentry.db.pass | quote }}
+
 - name: {{ $releases.redis }}
   namespace: {{ $namespaces.storage }}
   chart: dandy-developer/redis-ha
   installed: {{ $enables.storage }}
+{{- if ne $k8sRuntime "k3d" }}
   needs:
   - {{ $namespaces.storage }}/{{ $releases.openebs }}
+{{- end }}
   values:
   - fullnameOverride: {{ $releases.redis | quote }}
     hardAntiAffinity: false
+    replicas: {{ $redis.replicas.redis }}
     image:
       tag: 6-alpine
     haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
       enabled: true
+      replicas: {{ $redis.replicas.haproxy }}
       stickyBalancing: true
       hardAntiAffinity: false
       readOnly:
@@ -706,6 +783,7 @@ releases:
         enabled: true
     auth: true
     redisPassword: {{ $redis.password }}
+
 - name: {{ $releases.harbor }}
   namespace: {{ $namespaces.storage }}
   chart: harbor/harbor
@@ -723,6 +801,10 @@ releases:
     externalURL: "https://{{ $harbor.coreHostname }}"
     #externalURL: "https://{{ $releases.harbor }}-{{ $releases.harbor }}-core.{{ $namespaces.storage }}.svc"
     expose:  # by default, service is `ingress`
+      tls:
+        enabled: true
+      #  auto:
+      #    commonName: {{ $harbor.coreHostname }}
       #type: nodePort
       #nodePort:
       #  ports:
@@ -730,12 +812,11 @@ releases:
       #      nodePort: {{ $harbor.httpNodePort }}
       ingress:
         annotations:  # be sure to suffix registry with `:80` when pushing images
+          nginx.org/client-max-body-size: "0"
           ingress.kubernetes.io/ssl-redirect: "false"
           nginx.ingress.kubernetes.io/ssl-redirect: "false"
         hosts:
           core: {{ $harbor.coreHostname }}
-      tls:
-        enabled: true
     persistence:
       imageChartStorage:
         disableredirect: true
@@ -789,6 +870,38 @@ releases:
         <<: *harborVersion
       signer:
         <<: *harborVersion
+
+- name: {{ $releases.sentry }}
+  namespace: {{ $namespaces.storage }}
+  chart: sentry/sentry
+  installed: {{ $enables.storage }}
+  needs:
+  - {{ $namespaces.storage }}/patroni
+  - {{ $namespaces.storage }}/redis
+  values:
+  - sentry:
+      worker:
+        replicas: 1
+    images:
+      sentry:
+        tag: {{ $versions.sentry }}
+    postgresql:
+      enabled: false
+    externalPostgresql:
+      host: {{ $releases.patroni }}.{{ $namespaces.storage }}.svc
+      username: {{ $sentry.db.user | quote }}
+      password: {{ $sentry.db.pass | quote }}
+      database: {{ $sentry.db.name | quote }}
+    rabbitmq:
+      enabled: false
+    redis:
+      enabled: false
+    externalRedis:
+      host: {{ $releases.redis }}-haproxy.{{ $namespaces.storage }}.svc
+      password: {{ $redis.password | quote }}
+    user:
+      email: {{ $sentry.admin.user }}
+      password: {{ $sentry.admin.password }}
 
 ## monitoring
 - name: {{ $releases.thanos }}

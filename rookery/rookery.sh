@@ -1,9 +1,6 @@
 #!/bin/bash -e
-[ "${SCRIPT_DEBUG:-1}" -eq 0 ] && set -x && export KUBEDEE_DEBUG=1
 MYDIR="$(dirname "$(readlink -f "${0}")")"
-
-DEFAULT_PROXY_REGISTRIES=(ghcr.io k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do")
-REGISTRY_PROXY_REPO="${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.3"}"
+. "${MYDIR}/../common"
 
 usage(){
   local MYNAME="$(basename "${0}")"
@@ -37,74 +34,24 @@ EOF
 
 declare -A STABLE_VERSION_REQUIREMENTS=(
   ['victoria']='neutron-lib<2.7.0'
+  ['wallaby']='eventlet<0.30.3 zstd<1.5 flask<2.0 typing-extensions<3.10'
+)
+
+OS_PROFILES=(infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt)
+OS_PIP_ARGS=("--use-feature=in-tree-build")
+OS_PIP_PKGS=(
+  "psycopg2-binary" "uwsgi"
+  #"psycopg2cffi" "psycogreen" "pg8000<=1.16.5"
 )
 
 #until kubectl wait --for condition=complete job "k3d-${CLUSTER_NAME}-server"; do sleep 1; done 2>/dev/null
-setup_helm(){
-  declare -A HELM_PLUGINS=(
-    ['https://github.com/hypnoglow/helm-s3']="v0.9.2"
-    ['https://github.com/zendesk/helm-secrets']="v2.0.2"
-    ['https://github.com/aslafy-z/helm-git']="v0.8.1"
-    ['https://github.com/databus23/helm-diff']="v3.1.3"
-    ['https://github.com/hayorov/helm-gcs']="0.3.6"
-  )
-  helm version --template '{{.Version}}' | grep -E '^v3\.' || TILLER_SERVICE_ACCOUNT="tiller"
-  # Helm v2: `helm version -c --template '{{.Client.SemVer}}'`
-  [ -n "${TILLER_SERVICE_ACCOUNT}" ] && HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3" && install_tiller
-
-  echo "Installing Helm plugins…"
-  for i in "${!HELM_PLUGINS[@]}"; do helm plugin install "${i}" --version "${HELM_PLUGINS[${i}]}" ||:; done
-}
-
-install_tiller(){
-  echo "Installing Tiller…"
-  kubectl apply -f- <<EOF
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: ${TILLER_SERVICE_ACCOUNT}
-  namespace: kube-system
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: ${TILLER_SERVICE_ACCOUNT}-cluster-admin-crb
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: ${TILLER_SERVICE_ACCOUNT}
-  namespace: kube-system
-EOF
-
-  helm init --upgrade --service-account "${TILLER_SERVICE_ACCOUNT}"
-  until kubectl -n kube-system wait --for condition=available deploy tiller-deploy; do sleep 1; done 2>/dev/null
-}
-
-registry_proxy(){
-  local REGISTRIES="${PROXY_REGISTRIES:=${DEFAULT_PROXY_REGISTRIES[@]}}" AUTH_REGISTRIES="${PROXY_REGISTRIES_AUTH}" TARGET_FILE="${1}"
-  docker run -d \
-    --name "${REGISTRY_PROXY_HOSTNAME}" \
-    -v "${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache" \
-    -e "REGISTRIES=${REGISTRIES}" \
-    -e "AUTH_REGISTRIES=${AUTH_REGISTRIES}" \
-    -e "ENABLE_MANIFEST_CACHE=true" \
-    -e 'MANIFEST_CACHE_PRIMARY_REGEX=.*' \
-    -e 'MANIFEST_CACHE_PRIMARY_TIME=6h' \
-    -e 'MANIFEST_CACHE_SECONDARY_REGEX=.*' \
-    -e 'MANIFEST_CACHE_SECONDARY_TIME=6h' \
-    -e 'MANIFEST_CACHE_DEFAULT_TIME=6h' \
-    "${REGISTRY_PROXY_REPO}" &>/dev/null
-  docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> "${TARGET_FILE}"
-}
 
 populate_local_registry(){
-  local LOCI_LXD_LOCATION="/tmp/loci" TMP_SYSTEMD_SVC="$(mktemp)" OSH_IMG_LXD_LOCATION="/tmp/openstack-helm-images"
-  local BUILDER_HOST="kubedee-${CLUSTER_NAME}-controller"
-  #local BUILDER_HOST="$(lxc ls -cn --format csv | awk "/^kubedee-${CLUSTER_NAME}-worker-/" | head -n1)"
+  local LOCI_LXD_LOCATION="/tmp/loci" \
+    OSH_IMG_LXD_LOCATION="/tmp/openstack-helm-images" \
+    TMP_SYSTEMD_SVC="$(mktemp)" \
+    BUILDER_HOST="kubedee-${CLUSTER_NAME}-controller"
+    #BUILDER_HOST="$(lxc ls -cn --format csv | awk "/^kubedee-${CLUSTER_NAME}-worker-/" | head -n1)"
 
   cat <<EOF >"${TMP_SYSTEMD_SVC}"
 [Service]
@@ -116,63 +63,63 @@ EOF
   lxc file push -pr "${MYDIR}/../images/loci" "${BUILDER_HOST}${LOCI_LXD_LOCATION%/*}"
   lxc file push -pr "${MYDIR}/../images/openstack-helm-images" "${BUILDER_HOST}${OSH_IMG_LXD_LOCATION%/*}"
   lxc file push -pr "${TMP_SYSTEMD_SVC}" "${BUILDER_HOST}/etc/systemd/system/docker.service.d/registry-proxy.conf"
+
+  OSH_IMG_COMMON_BUILD_ARGS=(
+    "--build-arg" "CEPH_KEY=https://download.ceph.com/keys/release.asc"
+    "--build-arg" "CEPH_REPO=https://download.ceph.com/debian-${CEPH_VERSION}/"
+    "--build-arg" "CEPH_RELEASE=${CEPH_VERSION}"
+  )
+  LOCI_COMMON_BUILD_ARGS=(
+    "--build-arg" "FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}'"
+    "--build-arg" "PYTHON3=yes"
+    "--build-arg" "PROJECT_REF='stable/${OS_VERSION}'"
+    "--build-arg" "PROJECT_RELEASE='${OS_VERSION}'"
+    "--build-arg" "PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]}'"
+    "--build-arg" "PIP_ARGS='${OS_PIP_ARGS[@]}'"
+  )
+
   lxc exec "${BUILDER_HOST}" -- /bin/bash -ex <<EOF
 zypper in -ly docker
 echo '{"insecure-registries":["${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}"]}' >/etc/docker/daemon.json
 systemctl restart docker
 
-docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/ceph-config-helper:${OS_TAG}" || (docker build --force-rm \
-  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/ceph-config-helper:${OS_TAG}" \
+docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
+  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" \
   --build-arg KUBE_VERSION=v${K8S_VERSION} \
-  --build-arg CEPH_KEY=https://download.ceph.com/keys/release.asc \
-  --build-arg CEPH_REPO=https://download.ceph.com/debian-${CEPH_VERSION}/ \
-  --build-arg CEPH_RELEASE=${CEPH_VERSION} \
   --build-arg CEPH_RELEASE_TAG="${CEPH_VERSION}-1bionic" \
   -f "${OSH_IMG_LXD_LOCATION}/ceph-config-helper/Dockerfile.ubuntu_bionic" \
   "${OSH_IMG_LXD_LOCATION}/ceph-config-helper" \
-&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/ceph-config-helper:${OS_TAG}")
+&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}")
 
-docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/libvirt:${OS_TAG}" || (docker build --force-rm \
-  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/libvirt:${OS_TAG}" \
+docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
+  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" \
   --build-arg FROM=docker.io/ubuntu:focal \
   --build-arg UBUNTU_RELEASE=focal \
-  --build-arg CEPH_KEY=https://download.ceph.com/keys/release.asc \
-  --build-arg CEPH_REPO=https://download.ceph.com/debian-${CEPH_VERSION}/ \
-  --build-arg CEPH_RELEASE=${CEPH_VERSION} \
   --build-arg CEPH_RELEASE_TAG="${CEPH_VERSION}-1focal" \
   -f "${OSH_IMG_LXD_LOCATION}/libvirt/Dockerfile.ubuntu_bionic" \
   "${OSH_IMG_LXD_LOCATION}/libvirt" \
-&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/libvirt:${OS_TAG}")
+&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}")
 
 docker build --force-rm \
-  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/loci-base:${OS_TAG}" \
+  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}" \
   --build-arg CEPH_URL="http://download.ceph.com/debian-${CEPH_VERSION}/" \
   "${LOCI_LXD_LOCATION}/dockerfiles/${BASE_IMAGE}"
 
-#docker build --force-rm \
-#  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/requirements:${OS_TAG}" \
-#  --build-arg FROM="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/loci-base:${OS_TAG}" \
+#docker build --force-rm ${LOCI_COMMON_BUILD_ARGS[@]} \
+#  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}" \
 #  --build-arg PROJECT=requirements \
-#  --build-arg PYTHON3=yes \
-#  --build-arg PROJECT_REF="stable/${OS_VERSION}" \
-#  --build-arg PROJECT_RELEASE="${OS_VERSION}" \
-#  --build-arg PROFILES="requirements infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt" \
-#  --build-arg PIP_PACKAGES='psycopg2-binary uwsgi ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]}' \
-#  "${LOCI_LXD_LOCATION}"
+#  --build-arg PROFILES="${OS_PROFILES[@]}" \
+#  "${LOCI_LXD_LOCATION}" \
+#&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
 
-    #--build-arg PIP_PACKAGES='psycopg2-binary psycopg2cffi psycogreen pg8000<=1.16.5 uwsgi'
+    #--build-arg WHEELS="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
 for i in keystone glance cinder neutron nova placement horizon heat barbican octavia designate manila ironic magnum senlin trove; do
-  docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/\${i}:${OS_TAG}" || (docker build --force-rm \
-    -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/\${i}:${OS_TAG}" \
-    --build-arg FROM="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/loci-base:${OS_TAG}" \
+  docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" || (docker build --force-rm ${LOCI_COMMON_BUILD_ARGS[@]} \
+    -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" \
     --build-arg PROJECT="\${i}" \
-    --build-arg PYTHON3=yes \
-    --build-arg PROJECT_REF="stable/${OS_VERSION}" \
-    --build-arg PROJECT_RELEASE="${OS_VERSION}" \
-    --build-arg PROFILES="\${i} requirements infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt" \
-    --build-arg PIP_PACKAGES='psycopg2-binary uwsgi ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]}' \
+    --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
     "${LOCI_LXD_LOCATION}" \
-  && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/\${i}:${OS_TAG}")
+  && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}")
 done
 wait \$(jobs -rp)
 systemctl stop docker
@@ -189,51 +136,39 @@ up(){
     --controller-limits-memory "${CONTROLLER_MEMORY_SIZE}" \
     --worker-limits-memory "${WORKER_MEMORY_SIZE}" \
     --storage-pool "${LXD_STORAGE_POOL}" \
-    --rootfs-size "24GiB"
+    --rootfs-size "30GiB"
 
-  # registry proxy setup
-  local TMP_CA="$(mktemp)" TMP_SYSTEMD_SVC="$(mktemp)" \
-    CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
-    #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
-  lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
-  chmod u+w "${TMP_CA}"
-  mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
+  export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" \
+    LOCAL_REGISTRY_PORT="5000"
 
-  registry_proxy "${TMP_CA}"
+  KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}")
 
-  until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null ||:
-  until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null ||:
+  if false; then
+    registry_proxy_post::kubedee
+    for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-(etcd|registry)$'); do
+      lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
 
-  export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" LOCAL_REGISTRY_PORT="5000"
-  populate_local_registry
+      #iptables -I FORWARD -o docker0 -i kubedee-8lpln6 -j ACCEPT
+      #iptables -I FORWARD -o kubedee-8lpln6 -i docker0 -j ACCEPT
+    done
 
-  local REGISTRY_PROXY_ADDRESS="$(docker container inspect "${REGISTRY_PROXY_HOSTNAME}" -f '{{.NetworkSettings.IPAddress}}')"
-  cat <<EOF >"${TMP_SYSTEMD_SVC}"
-[Service]
-Environment="HTTP_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
-Environment="HTTPS_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
-Environment="NO_PROXY=${LOCAL_REGISTRY_HOST}"
-EOF
+    until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null
+    until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null
+  fi
 
-  lxc file push "${TMP_CA}" "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}"
-  lxc file push "${TMP_SYSTEMD_SVC}" "kubedee-${CLUSTER_NAME}-controller/etc/systemd/system/crio.service.d/registry-proxy.conf" -p
-  lxc exec "kubedee-${CLUSTER_NAME}-controller" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
+  [ -z "${POPULATE_LOCAL_REGISTRY}" ] || populate_local_registry
 
   # volume setup
   local i j
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-worker-"); do
     lxc exec "${i}" -- zypper in -ly lvm2
-    lxc file push "${TMP_CA}" "${i}${CACERT_PATH}"
-    lxc file push "${TMP_SYSTEMD_SVC}" "${i}/etc/systemd/system/crio.service.d/registry-proxy.conf" -p
     lxc stop "${i}" ||:
     for j in {b..g}; do
       lxc storage volume create "${LXD_STORAGE_POOL}" "${i}-sd${j}" size="${VOLUME_SIZE}" --type block
-      until lxc storage volume attach "${LXD_STORAGE_POOL}" "${i}-sd${j}" "${i}" ''; do :; done
+      [ -n "$(lxc config device get "${i}" "${i}-sd${j}" source)" ] || until lxc storage volume attach "${LXD_STORAGE_POOL}" "${i}-sd${j}" "${i}" ''; do :; done
     done
     lxc start "${i}"
   done
-
-  rm "${TMP_CA}" "${TMP_SYSTEMD_SVC}"
 
   #export CEPH_MON_COUNT="${NUM_WORKERS}"
   #if [ "${CEPH_MON_COUNT}" -gt 3 ]; then CEPH_MON_COUNT=3; fi
@@ -243,42 +178,36 @@ EOF
 
   #ROOK_NETWORK="$(lxc network get "$(cat ~/.local/share/kubedee/clusters/rookery/network_id)" ipv4.address)" \
   LOCAL_REGISTRY_ADDRESS="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}" \
-  helmfile -f "${MYDIR}/helmfile.yaml" sync
+  helmfile -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
 
   "${MYDIR}/../kubedee/kubedee" kubectl-env "${CLUSTER_NAME}"
 }
 
 down(){
-  "${MYDIR}/../kubedee/kubedee" delete "${CLUSTER_NAME}" ||:
-  docker rm -fv "${REGISTRY_PROXY_HOSTNAME}" ||:
+  set +e
+  "${MYDIR}/../kubedee/kubedee" delete "${CLUSTER_NAME}"
+  docker rm -fv "${REGISTRY_PROXY_HOSTNAME}"
   for i in $(lxc storage volume list "${LXD_STORAGE_POOL}" --format csv | awk -F, "/(^|,)kubedee-${CLUSTER_NAME}-worker-/ {print \$2}"); do
     lxc storage volume delete "${LXD_STORAGE_POOL}" "${i}"
   done
+  set -e
 }
 
 main(){
   : ${LXD_STORAGE_POOL:=default}
   : ${CLUSTER_NAME:=rookery}
   : ${NUM_WORKERS:=1}
-  : ${K8S_VERSION:=1.20.4}
-  : ${OS_VERSION:=victoria}
+  : ${K8S_VERSION:=1.21.1}
+  : ${OS_VERSION:=wallaby}
   : ${BASE_IMAGE:=ubuntu_bionic}
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
   : ${WORKER_MEMORY_SIZE:=12GiB}
-  : ${CEPH_VERSION:=15.2.9}
+  : ${CEPH_VERSION:=16.2.4}
   #NUM_VOLUMES="${NUM_VOLUMES:-2}"
 
   local SCRIPT_OP
   while [ "${#}" -gt 0 ]; do
     case "${1}" in
-      up | down)
-        SCRIPT_OP="${1}"
-        shift
-        ;;
-      -N | --name)
-        CLUSTER_NAME="${2}"
-        shift 2
-        ;;
       -n | --num)
         case "${2}" in
           ''|*[!0-9]*)
@@ -290,40 +219,24 @@ main(){
         NUM_WORKERS="${2}"
         shift 2
         ;;
-      -V | --version)
-        K8S_VERSION="${2}"
-        shift 2
-        ;;
-      -s | --storage-pool)
-        LXD_STORAGE_POOL="${2}"
-        shift 2
-        ;;
-      -o | --openstack-version)
-        OS_VERSION="${2}"
-        shift 2
-        ;;
-      -b | --base-image)
-        BASE_IMAGE="${2}"
-        shift 2
-        ;;
-      -c | --controller-mem)
-        CONTROLLER_MEMORY_SIZE="${2}"
-        shift 2
-        ;;
-      -w | --worker-mem)
-        WORKER_MEMORY_SIZE="${2}"
-        shift 2
-        ;;
-      -C | --ceph-version)
-        CEPH_VERSION="${2}"
-        shift 2
-        ;;
+      -N | --name) CLUSTER_NAME="${2}"; shift 2;;
+      -V | --version) K8S_VERSION="${2}"; shift 2;;
+      -s | --storage-pool) LXD_STORAGE_POOL="${2}"; shift 2;;
+      -o | --openstack-version) OS_VERSION="${2}"; shift 2;;
+      -b | --base-image) BASE_IMAGE="${2}"; shift 2;;
+      -c | --controller-mem) CONTROLLER_MEMORY_SIZE="${2}"; shift 2;;
+      -w | --worker-mem) WORKER_MEMORY_SIZE="${2}"; shift 2;;
+      -C | --ceph-version) CEPH_VERSION="${2}"; shift 2;;
+      -p | --populate-local-registry) POPULATE_LOCAL_REGISTRY="y"; shift;;
+      up | down) SCRIPT_OP="${1}"; shift;;
       *) usage;;
     esac
   done
   [ -z "${SCRIPT_OP}" ] && usage
 
-  export OS_TAG="${OS_VERSION}-${BASE_IMAGE}" VOLUME_SIZE="${VOLUME_SIZE:-15GiB}"
+  export BASE_IMAGE CEPH_VERSION OS_VERSION \
+      OS_TAG="${OS_VERSION}-${BASE_IMAGE}" \
+      VOLUME_SIZE="${VOLUME_SIZE:-15GiB}"
   : ${REGISTRY_PROXY_HOSTNAME:="kubedee-${CLUSTER_NAME}-registry-proxy-cache.local"}
   : ${REGISTRY_PROXY_HOST_PATH:=/var/tmp/oci-registry}
 

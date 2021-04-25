@@ -1,0 +1,113 @@
+HELM_BIN="$(command -v "${HELM:=helm}")"
+DEFAULT_PROXY_REGISTRIES=(ghcr.io k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do")
+REGISTRY_PROXY_REPO="${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.3"}"
+KUBE_NOPROXY_SETTING=(
+  '.cluster.local' '.svc'
+#  '192.168.0.0/16' '172.16.0.0/12' '10.0.0.0/8'
+)
+
+[ "${SCRIPT_DEBUG:=1}" -eq 0 ] && set -x && export KUBEDEE_DEBUG=1
+
+string_join() { local IFS="$1"; shift; echo "$*"; }
+
+setup_helm(){
+  declare -A HELM_PLUGINS=(
+    ['https://github.com/hypnoglow/helm-s3']="v0.10.0"
+    ['https://github.com/jkroepke/helm-secrets']="v3.6.1"
+    ['https://github.com/aslafy-z/helm-git']="v0.10.0"
+    ['https://github.com/databus23/helm-diff']="v3.1.3"
+    ['https://github.com/hayorov/helm-gcs']="0.3.11"
+  )
+  "${HELM_BIN}" version --template '{{.Version}}' | grep -E '^v3\.' || TILLER_SERVICE_ACCOUNT="tiller"
+  # Helm v2: `"${HELM_BIN}" version -c --template '{{.Client.SemVer}}'`
+  [ -n "${TILLER_SERVICE_ACCOUNT}" ] && HELM_PLUGINS['https://github.com/rimusz/helm-tiller']="v0.9.3" && install_tiller
+  for i in "${!HELM_PLUGINS[@]}"; do "${HELM_BIN}" plugin install "${i}" --version "${HELM_PLUGINS[${i}]}" ||:; done
+}
+
+install_tiller(){
+  echo "Installing Tiller…"
+  kubectl apply -f- <<EOF
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${TILLER_SERVICE_ACCOUNT}
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ${TILLER_SERVICE_ACCOUNT}-cluster-admin-crb
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: ${TILLER_SERVICE_ACCOUNT}
+  namespace: kube-system
+EOF
+
+  "${HELM_BIN}" init --upgrade --service-account "${TILLER_SERVICE_ACCOUNT}"
+  until kubectl -n kube-system wait --for condition=available deploy tiller-deploy; do sleep 1; done 2>/dev/null
+}
+
+registry_proxy_post::shared(){
+  local REGISTRIES="${PROXY_REGISTRIES:=${DEFAULT_PROXY_REGISTRIES[@]}}" AUTH_REGISTRIES="${PROXY_REGISTRIES_AUTH}" TARGET_FILE="${1}"
+  docker run -d \
+    --name "${REGISTRY_PROXY_HOSTNAME}" \
+    -v "${REGISTRY_PROXY_HOST_PATH}:/docker_mirror_cache" \
+    -e "REGISTRIES=${REGISTRIES}" \
+    -e "AUTH_REGISTRIES=${AUTH_REGISTRIES}" \
+    -e "ENABLE_MANIFEST_CACHE=true" \
+    -e 'MANIFEST_CACHE_PRIMARY_REGEX=.*' \
+    -e 'MANIFEST_CACHE_PRIMARY_TIME=6h' \
+    -e 'MANIFEST_CACHE_SECONDARY_REGEX=.*' \
+    -e 'MANIFEST_CACHE_SECONDARY_TIME=6h' \
+    -e 'MANIFEST_CACHE_DEFAULT_TIME=6h' \
+    ${REGISTRY_PROXY_DOCKER_ARGS[@]} \
+    "${REGISTRY_PROXY_REPO}" &>/dev/null
+  docker exec "${REGISTRY_PROXY_HOSTNAME}" /bin/sh -c 'until test -f /ca/ca.crt; do sleep 1; done; cat /ca/ca.crt' >> "${TARGET_FILE}"
+}
+
+registry_proxy_post::kubedee(){
+  local TMP_CA="$(mktemp)" \
+    TMP_CRIO_CONF="$(mktemp)" \
+    TMP_SYSTEMD_SVC="$(mktemp)" \
+    CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
+    #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
+  lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
+  chmod u+w "${TMP_CA}"
+  mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
+
+  #lxc file pull kubedee-${CLUSTER_NAME}-controller/etc/crio/crio.conf "${TMP_CRIO_CONF}"
+  #sed -i 's/^\(#[[:space:]]*\)\?storage_driver[[:space:]]*=.*/storage_driver = "zfs"/' "${TMP_CRIO_CONF}"
+
+  ## rsync somehow ducks up
+  # sysctl -w kernel.unprivileged_userns_clone=1
+  # lxc-create -t oci -n a1 -- --dhcp -u docker://docker.io/${REGISTRY_PROXY_REPO}
+  # lxc-start -n a1
+
+  ## remove '^lxc.(init|execute)' from lxc container config
+  ## might not be possible to migrate this to lxd
+  # lxc-to-lxd --rsync-args '-zz' --containers a1
+  # lxc delete -f a1
+
+  registry_proxy_post::shared "${TMP_CA}"
+
+  local REGISTRY_PROXY_ADDRESS="$(docker container inspect "${REGISTRY_PROXY_HOSTNAME}" -f '{{.NetworkSettings.IPAddress}}')"
+  cat <<EOF >"${TMP_SYSTEMD_SVC}"
+[Service]
+Environment="HTTP_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
+Environment="HTTPS_PROXY=http://${REGISTRY_PROXY_ADDRESS}:3128/"
+Environment="NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
+EOF
+
+  for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
+    lxc file push "${TMP_CA}" "${i}${CACERT_PATH}"
+    lxc file push "${TMP_SYSTEMD_SVC}" "${i}/etc/systemd/system/crio.service.d/registry-proxy.conf" -p
+    RESTART_CRIO=0
+  done
+
+  rm "${TMP_CA}" "${TMP_SYSTEMD_SVC}" "${TMP_CRIO_CONF}"
+}

@@ -23,10 +23,10 @@ repositories:
 {{- $credentials := dict "database" (dict "root" (dict "scheme" (default "postgresql+psycopg2" (env "DB_SCHEME")) "host" (default "patroni" (env "DB_HOST")) "port" (default 5432 (env "DB_PORT")) "user" (default "postgres" (env "DB_ROOT_USER")) "pass" (default "tea" (env "DB_ROOT_PASS"))) "keystone" (dict "name" (default "keystone" (env "DB_KEYSTONE_NAME")) "user" (default "keystone" (env "DB_KEYSTONE_USER")) "pass" (default "keystone" (env "DB_KEYSTONE_PASS"))) "glance" (dict "name" (default "glance" (env "DB_GLANCE_NAME")) "user" (default "glance" (env "DB_GLANCE_USER")) "pass" (default "glance" (env "DB_GLANCE_PASS"))) "cinder" (dict "name" (default "cinder" (env "DB_CINDER_NAME")) "user" (default "cinder" (env "DB_CINDER_USER")) "pass" (default "cinder" (env "DB_CINDER_PASS"))) "nova" (dict "name" (default "nova" (env "DB_NOVA_NAME")) "user" (default "nova" (env "DB_NOVA_USER")) "pass" (default "nova" (env "DB_NOVA_PASS"))) "nova_api" (dict "name" (default "nova_api" (env "DB_NOVA_API_NAME")) "user" (default "nova_api" (env "DB_NOVA_API_USER")) "pass" (default "nova_api" (env "DB_NOVA_API_PASS"))) "nova_cell0" (dict "name" (default "nova_cell0" (env "DB_NOVA_CELL0_NAME")) "user" (default "nova_cell0" (env "DB_NOVA_CELL0_USER")) "pass" (default "nova_cell0" (env "DB_NOVA_CELL0_PASS"))) "neutron" (dict "name" (default "neutron" (env "DB_NEUTRON_NAME")) "user" (default "neutron" (env "DB_NEUTRON_USER")) "pass" (default "neutron" (env "DB_NEUTRON_PASS"))) "heat" (dict "name" (default "heat" (env "DB_HEAT_NAME")) "user" (default "heat" (env "DB_HEAT_USER")) "pass" (default "heat" (env "DB_HEAT_PASS"))) "horizon" (dict "name" (default "horizon" (env "DB_HORIZON_NAME")) "user" (default "horizon" (env "DB_HORIZON_USER")) "pass" (default "horizon" (env "DB_HORIZON_PASS"))) "barbican" (dict "name" (default "barbican" (env "DB_BARBICAN_NAME")) "user" (default "barbican" (env "DB_BARBICAN_USER")) "pass" (default "barbican" (env "DB_BARBICAN_PASS"))) "octavia" (dict "name" (default "octavia" (env "DB_OCTAVIA_NAME")) "user" (default "octavia" (env "DB_OCTAVIA_USER")) "pass" (default "octavia" (env "DB_OCTAVIA_PASS"))) "placement" (dict "name" (default "placement" (env "DB_PLACEMENT_NAME")) "user" (default "placement" (env "DB_PLACEMENT_USER")) "pass" (default "placement" (env "DB_PLACEMENT_PASS"))) "designate" (dict "name" (default "designate" (env "DB_DESIGNATE_NAME")) "user" (default "designate" (env "DB_DESIGNATE_USER")) "pass" (default "designate" (env "DB_DESIGNATE_PASS"))) "powerdns" (dict "name" (default "powerdns" (env "DB_POWERDNS_NAME")) "user" (default "powerdns" (env "DB_POWERDNS_USER")) "pass" (default "powerdns" (env "DB_POWERDNS_PASS"))) "magnum" (dict "name" (default "magnum" (env "DB_MAGNUM_NAME")) "user" (default "magnum" (env "DB_MAGNUM_USER")) "pass" (default "magnum" (env "DB_MAGNUM_PASS"))) "senlin" (dict "name" (default "senlin" (env "DB_SENLIN_NAME")) "user" (default "senlin" (env "DB_SENLIN_USER")) "pass" (default "magnum" (env "DB_SENLIN_PASS")))) "rabbitmq" (dict "root" (dict "host" (default "rabbitmq" (env "RMQ_HOST")) "user" (default "rabbitmq" (env "RMQ_ROOT_USER")) "pass" (default "rabbitmq" (env "RMQ_ROOT_PASS")) "cookie" (default "BYWVYUKFWOTNDQNLDTDN" (env "RMQ_COOKIE"))) "keystone" (dict "user" (default "keystone" (env "RMQ_KEYSTONE_USER")) "pass" (default "keystone" (env "RMQ_KEYSTONE_PASS"))) "glance" (dict "user" (default "glance" (env "RMQ_GLANCE_USER")) "pass" (default "glance" (env "RMQ_GLANCE_PASS"))) "cinder" (dict "user" (default "cinder" (env "RMQ_CINDER_USER")) "pass" (default "cinder" (env "RMQ_CINDER_PASS"))) "nova" (dict "user" (default "nova" (env "RMQ_NOVA_USER")) "pass" (default "nova" (env "RMQ_NOVA_PASS"))) "neutron" (dict "user" (default "neutron" (env "RMQ_NEUTRON_USER")) "pass" (default "neutron" (env "RMQ_NEUTRON_PASS"))) "barbican" (dict "user" (default "barbican" (env "RMQ_BARBICAN_USER")) "pass" (default "barbican" (env "RMQ_BARBICAN_PASS"))) "heat" (dict "user" (default "heat" (env "RMQ_HEAT_USER")) "pass" (default "heat" (env "RMQ_HEAT_PASS"))) "octavia" (dict "user" (default "octavia" (env "RMQ_OCTAVIA_USER")) "pass" (default "octavia" (env "RMQ_OCTAVIA_PASS"))) "designate" (dict "user" (default "designate" (env "RMQ_DESIGNATE_USER")) "pass" (default "designate" (env "RMQ_DESIGNATE_PASS"))) "magnum" (dict "user" (default "magnum" (env "RMQ_MAGNUM_USER")) "pass" (default "magnum" (env "RMQ_MAGNUM_PASS"))) "senlin" (dict "user" (default "senlin" (env "RMQ_SENLIN_USER")) "pass" (default "senlin" (env "RMQ_SENLIN_PASS")))) }}
 {{- $databaseSikrit := "openstack-on-pg" }}
 
-{{- $chartVersions := dict "mariadb" (default "4.4.6" (env "CHART_VERSION_MARIADB")) "memcached" (default "4.2.27" (env "CHART_VERSION_MEMCACHED")) "rabbitmq" (default "7.8.0" (env "CHART_VERSION_RABBITMQ")) "rook" (default "v1.4.7" (env "CHART_VERSION_ROOK")) "mysql" (default "6.14.12" (env "CHART_VERSION_MYSQL")) }}
+{{- $chartVersions := dict "mariadb" (default "4.4.6" (env "CHART_VERSION_MARIADB")) "memcached" (default "4.2.27" (env "CHART_VERSION_MEMCACHED")) "rabbitmq" (default "7.8.0" (env "CHART_VERSION_RABBITMQ")) "rook" (default "v1.4.8" (env "CHART_VERSION_ROOK")) "mysql" (default "6.14.12" (env "CHART_VERSION_MYSQL")) }}
 
-{{- $openebsVersion := "2.5.0" }}
-{{- $openebsNdmVersion := "1.1.1" }}
+{{- $openebsVersion := "2.9.0" }}
+{{- $openebsNdmVersion := "1.4.1" }}
 {{- $backingStorageClass := "openebs-device" }}
 
 {{- $rookOperatorNamespace := "rook-ceph" }}
@@ -54,7 +54,7 @@ repositories:
 {{- $registryAddress := default "kubedee-rookery-registry:5000" (env "LOCAL_REGISTRY_ADDRESS") }}
 
 {{- $openstackNamespace := "openstack" }}
-{{- $openstackVersion := default "victoria" (env "OS_VERSION") }}
+{{- $openstackVersion := default "wallaby" (env "OS_VERSION") }}
 {{- $openstackBaseImage := default "ubuntu_bionic" (env "BASE_IMAGE") }}
 {{- $openstackTag := printf "%s-%s" $openstackVersion $openstackBaseImage }}
 
@@ -92,14 +92,14 @@ templates:
       args:
       - "-xc"
       #- "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../../openstack-helm-infra/helm-toolkit#g' $(find ../charts/openstack-helm -type f -name requirements.yaml)"
-      - "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../../openstack-helm-infra/helm-toolkit#g' $(find ../charts/openstack-helm -type f -name requirements.yaml); find ../charts/openstack-helm -type f -name requirements.lock -delete"
+      - "find ../charts/openstack-helm -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../../openstack-helm-infra/helm-toolkit#g' $(find ../charts/openstack-helm -type f -name requirements.yaml)"
     - &helmToolkitDependencyFixupL1
       events: ["prepare"]
       command: "/bin/sh"
       args:
       - "-xc"
       #- "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' ../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml ../charts/openstack-helm-infra/libvirt/requirements.yaml ../charts/openstack-helm-infra/openvswitch/requirements.yaml ../charts/openstack-helm-infra/powerdns/requirements.yaml"
-      - "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' ../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml ../charts/openstack-helm-infra/libvirt/requirements.yaml ../charts/openstack-helm-infra/openvswitch/requirements.yaml ../charts/openstack-helm-infra/powerdns/requirements.yaml; find ../charts/openstack-helm-infra -type f -name requirements.lock -delete"
+      - "find ../charts/openstack-helm-infra -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' ../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml ../charts/openstack-helm-infra/libvirt/requirements.yaml ../charts/openstack-helm-infra/openvswitch/requirements.yaml ../charts/openstack-helm-infra/powerdns/requirements.yaml"
     values:
     - &openstackCommon
       # related: https://docs.openstack.org/nova/latest/reference/threading.html#mysql-access-and-eventlet
@@ -166,12 +166,12 @@ templates:
       images:
         pull_policy: "Always"
         tags:
-          bootstrap: {{ $registryAddress }}/heat:{{ $openstackTag }}
-          db_drop: {{ $registryAddress }}/heat:{{ $openstackTag }}
-          db_init: {{ $registryAddress }}/heat:{{ $openstackTag }}
-          ks_user: {{ $registryAddress }}/heat:{{ $openstackTag }}
-          ks_endpoints: {{ $registryAddress }}/heat:{{ $openstackTag }}
-          ks_service: {{ $registryAddress }}/heat:{{ $openstackTag }}
+          bootstrap: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+          db_drop: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+          db_init: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+          ks_user: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+          ks_endpoints: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+          ks_service: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
           nginx: docker.io/nginx:1.18
       network:
 {{- range $ingressSvc := list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
@@ -221,6 +221,7 @@ releases:
       <<: *openebsTag
     localprovisioner:
       enabled: true
+      replicas: 3
       <<: *openebsTag
     snapshotOperator:  # not needed for just local PV
       <<: *openebsLVP
@@ -248,6 +249,7 @@ releases:
       monitoring:
         <<: *openebsTag
     ndmOperator:
+      enabled: false
       <<: *openebsNdmTag
     ndm:
       <<: *openebsNdmTag
@@ -383,6 +385,8 @@ releases:
     #  repository: library/memcached
     #  tag: 1.6.8-alpine
 
+{{- $patroni := dict "replicas" (default 3 (env "RDBMS_COUNT")) "bouncers" 1 "image" "registry.opensource.zalan.do/acid/spilo-13" "tag" "2.0-p7" }}
+{{- $patroniHashedName := printf "patroni-%s" (printf "%s:%s" $patroni.image $patroni.tag | sha256sum | trunc 8) }}
 - name: patroni
   namespace: {{ $openstackNamespace }}
   #installed: false
@@ -393,17 +397,17 @@ releases:
   - openebs/openebs
   values:
   - fullnameOverride: {{ $credentials.database.root.host | quote }}
-    replicaCount: {{ default 2 (env "RDBMS_COUNT") }}
+    replicaCount: {{ $patroni.replicas }}
     image:
-      repository: registry.opensource.zalan.do/acid/spilo-13
-      tag: 2.0-p5
+      repository: {{ $patroni.image }}
+      tag: {{ $patroni.tag }}
 {{- if $openstackEnableTLS }}
     tls:
       issuerRef:
         name: {{ $openstackCertIssuers.openstack.name }}
         kind: Issuer
     pgbouncer:
-      replicaCount: 1
+      replicaCount: {{ $patroni.bouncers }}
       tls:
         server:
           issuerRef:
@@ -440,6 +444,21 @@ releases:
           logging_collector: "off"
     credentials:
       superuser: {{ $credentials.database.root.pass | quote }}
+    metrics:
+      postgresql:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+      patroni:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
 
 - name: mariadb
   namespace: {{ $openstackNamespace }}
@@ -519,6 +538,13 @@ releases:
   needs:
   - openebs/openebs
 {{- end }}
+  values:
+  - csi:
+      provisionerTolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: Exists
+        value: ""
+        #effect: "NoSchedule,PreferNoSchedule,NoExecute"
   hooks:
   - *kubedeeRunningHook
   - events: ["postsync"]
@@ -547,8 +573,8 @@ releases:
       spec:
         dataDirHostPath: /var/lib/rook
         cephVersion:
-          image: ceph/ceph:v15
-          allowUnsupported: false
+          image: ceph/ceph:v{{ default "16.2.4" (env "CEPH_VERSION") }}
+          allowUnsupported: true
         mon:
           count: {{ default 3 (env "CEPH_MON_COUNT") }}
           allowMultiplePerNode: true
@@ -608,11 +634,11 @@ releases:
           rook_cluster: {{ $rookOperatorNamespace }}
           ceph_daemon_type: mon
         ports:
-        - name: mon
+        - name: tcp-msgr1
           port: 6789
           protocol: TCP
           targetPort: 6789
-        - name: mon-msgr2
+        - name: tcp-msgr2
           port: 3300
           protocol: TCP
           targetPort: 3300
@@ -688,7 +714,7 @@ releases:
               effect: "NoExecute"
               tolerationSeconds: 5
       EOF
-      until kubectl -n {{ $rookOperatorNamespace }} wait --for condition=ready cephcluster {{ $rookClusterName }}; do sleep 1; done 2>/dev/null
+      #until kubectl -n {{ $rookOperatorNamespace }} wait --for condition=ready cephcluster {{ $rookClusterName }}; do sleep 1; done 2>/dev/null
       kubectl apply -f- <<EOF
 {{- if $rookEnableRBD }}
       # https://rook.io/docs/rook/master/ceph-pool-crd.html
@@ -881,17 +907,28 @@ releases:
   - {{ $rookOperatorNamespace }}/rook-operator
   hooks:
   - *helmToolkitDependencyFixupL1
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - "until kubectl -n {{ $rookOperatorNamespace }} get secret/{{ $rookOperatorNamespace }}-admin-keyring; do sleep 1; done"
   values:
   - labels:
       job:
         <<: *openstackControlNodeSelector
       provisioner:
         <<: *openstackControlNodeSelector
+    #manifests:
+    #  # broken in openstack-helm-infra commit 734b344bf6a2106b234bca0c927f0accb8331cf4
+    #  job_namespace_client_ceph_config: false
     endpoints:
       ceph_mon:
         hosts:
-          #default: ceph-mon
-          default: {{ $rookOperatorNamespace }}-mon-a
+          #default: {{ $rookOperatorNamespace }}-mon-a
+          default: ceph-mon
+          discovery:
+            rook_cluster: {{ $rookOperatorNamespace }}
+            ceph_daemon_type: mon
         namespace: rook-ceph
     deployment:
       ceph: false
@@ -946,14 +983,14 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        keystone_api: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_credential_cleanup: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        keystone_db_sync: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_domain_manage: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_credential_rotate: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_credential_setup: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_fernet_rotate: {{ $registryAddress }}/keystone:{{ $openstackTag }}
-        keystone_fernet_setup: {{ $registryAddress }}/keystone:{{ $openstackTag }}
+        keystone_api: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_credential_cleanup: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        keystone_db_sync: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_domain_manage: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_credential_rotate: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_credential_setup: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_fernet_rotate: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
+        keystone_fernet_setup: {{ $registryAddress }}/openstack/keystone:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1005,22 +1042,67 @@ releases:
   values:
 {{- if $openstackEnableTLS }}
   - ../charts/openstack-helm/glance/values_overrides/tls.yaml
+  - nginx-void.yaml
+  - endpoints:
+      identity:
+        scheme:
+          default: http
+      image:
+        scheme:  # temporary?
+          default: http
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: glance-api-tls
+      image_registry:
+        scheme:  # temporary?
+          default: http
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: glance-registry-tls
+    secrets:
+      rbd: pvc-ceph-client-key
+      tls:
+        image:
+          api:
+            public: glance-api-tls
+            internal: glance-api-tls
+        image_registry:
+          api:
+            public: glance-registry-tls
+            internal: glance-registry-tls
+    manifests:
+      certificates: true
+    #network:
+    #  api:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "glance-api"
+    #  registry:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "glance-registry"
 {{- end }}
   - *openstackCommon
   - storage: rbd
     conf:
       glance:
+        DEFAULT:
+          bind_host: 0.0.0.0
         glance_store:
-          rbd_store_replication: 1
+          rbd_store_replication: 2
           # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
           rbd_store_crush_rule: {{ $cephExampleReplPool }}
     images:
       tags:
-        glance_api: {{ $registryAddress }}/glance:{{ $openstackTag }}
-        glance_db_sync: {{ $registryAddress }}/glance:{{ $openstackTag }}
-        glance_metadefs_load: {{ $registryAddress }}/glance:{{ $openstackTag }}
-        glance_registry: {{ $registryAddress }}/glance:{{ $openstackTag }}
-        glance_storage_init: {{ $registryAddress }}/ceph-config-helper:{{ $openstackTag }}
+        glance_api: {{ $registryAddress }}/openstack/glance:{{ $openstackTag }}
+        glance_db_sync: {{ $registryAddress }}/openstack/glance:{{ $openstackTag }}
+        glance_metadefs_load: {{ $registryAddress }}/openstack/glance:{{ $openstackTag }}
+        glance_registry: {{ $registryAddress }}/openstack/glance:{{ $openstackTag }}
+        glance_storage_init: {{ $registryAddress }}/openstack/ceph-config-helper:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1037,45 +1119,18 @@ releases:
         ingress:
           annotations:
             nginx.org/rewrites: "serviceName=glance-api rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "glance-api"
-{{- end }}
+            nginx.org/websocket-services: glance-api
       registry:
         ingress:
           annotations:
-            nginx.org/rewrites: "serviceName=glance-api rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "glance-api"
-    manifests:
-      certificates: true
-      job_bootstrap: false
-    endpoints:
-      identity:
-        scheme:
-          default: http
-      image:
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: glance-api-tls
-      image_registry:
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: glance-registry-tls
-    secrets:
-      tls:
-        image:
-          api:
-            public: glance-api-tls
-            internal: glance-api-tls
-        image_registry:
-          api:
-            public: glance-registry-tls
-            internal: glance-registry-tls
-{{- end }}
+            nginx.org/rewrites: "serviceName=glance-registry rewrite=/"
+            #nginx.org/websocket-services: glance-registry
+    #manifests:
+    #  deployment_registry: true
+    #  ingress_registry: true
+    #  pdb_registry: true
+    #  service_ingress_registry: true
+    #  service_registry: true
 
 - name: cinder
   namespace: {{ $openstackNamespace }}
@@ -1098,19 +1153,25 @@ releases:
             # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
             crush_rule: {{ $cephExampleReplPool }}
           cinder.volumes:
-            replication: 1
+            replication: 2
             # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
             crush_rule: {{ $cephExampleReplPool }}
+      #cinder:
+      #  DEFAULT:
+      #    backup_driver: "cinder.backup.drivers.ceph.CephBackupDriver"
+      #    backup_ceph_conf: /etc/ceph/ceph.conf
+      #    backup_ceph_user: cinderbackup
+      #    backup_ceph_pool: cinder.backups
     images:
       tags:
-        cinder_api: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_db_sync: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_storage_init: {{ $registryAddress }}/ceph-config-helper:{{ $openstackTag }}
-        cinder_scheduler: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_volume: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_volume_usage_audit: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_backup: {{ $registryAddress }}/cinder:{{ $openstackTag }}
-        cinder_backup_storage_init: {{ $registryAddress }}/ceph-config-helper:{{ $openstackTag }}
+        cinder_api: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_db_sync: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_storage_init: {{ $registryAddress }}/openstack/ceph-config-helper:{{ $openstackTag }}
+        cinder_scheduler: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_volume: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_volume_usage_audit: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_backup: {{ $registryAddress }}/openstack/cinder:{{ $openstackTag }}
+        cinder_backup_storage_init: {{ $registryAddress }}/openstack/ceph-config-helper:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1144,7 +1205,13 @@ releases:
       network_policy: true
 {{- if $openstackEnableTLS }}
     #  certificates: true
-    #endpoints:
+    endpoints:
+      image:
+        scheme:
+          default: http
+      image_registry:
+        scheme:
+          default: http
     #  volume:
     #    host_fqdn_override:
     #      default:
@@ -1177,17 +1244,45 @@ releases:
   values:
 {{- if $openstackEnableTLS }}
   - ../charts/openstack-helm/heat/values_overrides/tls.yaml
+  - manifests:
+      certificates: true
+    endpoints:
+      identity:
+        scheme:
+          default: http
+      orchestration:
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: heat-api-tls
+      cloudformation:
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: heat-cfn-tls
+    secrets:
+      tls:
+        orchestration:
+          api:
+            public: heat-api-tls
+            internal: heat-api-tls
+        cloudformation:
+          cfn:
+            public: heat-cfn-tls
+            internal: heat-cfn-tls
 {{- end }}
   - *openstackCommon
   - images:
       tags:
-        heat_api: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_cfn: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_cloudwatch: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_db_sync: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_engine: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_engine_cleaner: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        heat_purge_deleted: {{ $registryAddress }}/heat:{{ $openstackTag }}
+        heat_api: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_cfn: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_cloudwatch: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_db_sync: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_engine: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_engine_cleaner: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        heat_purge_deleted: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1218,36 +1313,6 @@ releases:
       #  ingress:
       #    annotations:
       #      nginx.org/rewrites: "serviceName=heat-api rewrite=/"
-{{- if $openstackEnableTLS }}
-    manifests:
-      certificates: true
-    endpoints:
-      identity:
-        scheme:
-          default: http
-      orchestration:
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: heat-api-tls
-      cloudformation:
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: heat-cfn-tls
-    secrets:
-      tls:
-        orchestration:
-          api:
-            public: heat-api-tls
-            internal: heat-api-tls
-        cloudformation:
-          cfn:
-            public: heat-cfn-tls
-            internal: heat-cfn-tls
-{{- end }}
 
 - name: neutron
   namespace: {{ $openstackNamespace }}
@@ -1318,21 +1383,54 @@ releases:
   values:
 {{- if $openstackEnableTLS }}
   - ../charts/openstack-helm/neutron/values_overrides/tls.yaml
+  - nginx-void.yaml
+  - conf:
+      neutron:
+        DEFAULT:
+          bind_host: 0.0.0.0
+    endpoints:
+      identity:
+        scheme:
+          default: http
+      network:
+        scheme:  # temporary?
+          default: http
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: neutron-tls
+    manifests:
+      certificates: true
+    #network:
+    #  server:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "neutron-server"
+    secrets:
+      tls:
+        compute_metadata:
+          metadata:
+            internal: nova-metadata-tls
+        network:
+          server:
+            public: neutron-tls
+            internal: neutron-tls
 {{- end }}
   - *openstackCommon
   - images:
       tags:
-        neutron_db_sync: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_server: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_dhcp: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_metadata: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_l3: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_l2gw: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_openvswitch_agent: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_linuxbridge_agent: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_bagpipe_bgp: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_ironic_agent: {{ $registryAddress }}/neutron:{{ $openstackTag }}
-        neutron_netns_cleanup_cron: {{ $registryAddress }}/neutron:{{ $openstackTag }}
+        neutron_db_sync: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_server: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_dhcp: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_metadata: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_l3: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_l2gw: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_openvswitch_agent: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_linuxbridge_agent: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_bagpipe_bgp: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_ironic_agent: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
+        neutron_netns_cleanup_cron: {{ $registryAddress }}/openstack/neutron:{{ $openstackTag }}
     labels:
       agent:
         dhcp:
@@ -1366,9 +1464,7 @@ releases:
         ingress:
           annotations:
             nginx.org/rewrites: "serviceName=neutron-server rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "neutron-server"
-{{- end }}
+            nginx.org/websocket-services: neutron-server
     conf:
       neutron:
         DEFAULT:
@@ -1409,28 +1505,6 @@ releases:
         neutron_agent: false
     manifests:
       daemonset_sriov_agent: false
-{{- if $openstackEnableTLS }}
-      certificates: true
-    endpoints:
-      identity:
-        scheme:
-          default: http
-      network:
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: neutron-tls
-    secrets:
-      tls:
-        compute_metadata:
-          metadata:
-            internal: nova-metadata-tls
-        network:
-          server:
-            public: neutron-tls
-            internal: neutron-tls
-{{- end }}
 
 - name: libvirt
   namespace: {{ $openstackNamespace }}
@@ -1447,11 +1521,15 @@ releases:
   - images:
       pull_policy: "Always"
       tags:
-        libvirt: {{ $registryAddress }}/libvirt:{{ $openstackTag }}
+        libvirt: {{ $registryAddress }}/openstack/libvirt:{{ $openstackTag }}
     labels:
       agent:
         libvirt:
           <<: *openstackComputeNodeSelector
+    conf:
+      ceph:
+        cinder:
+          user: admin
 
 - name: nova
   namespace: {{ $openstackNamespace }}
@@ -1467,115 +1545,10 @@ releases:
   values:
 {{- if $openstackEnableTLS }}
   - ../charts/openstack-helm/nova/values_overrides/tls.yaml
-{{- end }}
-  - *openstackCommon
-  - images:
-      tags:
-        nova_api: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_cell_setup: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_cell_setup_init: {{ $registryAddress }}/heat:{{ $openstackTag }}
-        nova_compute: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_compute_ironic: docker.io/kolla/ubuntu-source-nova-compute-ironic:{{ $openstackVersion }}
-        nova_compute_ssh: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_conductor: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_consoleauth: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_db_sync: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_novncproxy: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ $openstackVersion }}
-        nova_placement: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_scheduler: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_service_cleaner: {{ $registryAddress }}/ceph-config-helper:{{ $openstackTag }}
-        nova_spiceproxy: {{ $registryAddress }}/nova:{{ $openstackTag }}
-        nova_spiceproxy_assets: {{ $registryAddress }}/nova:{{ $openstackTag }}
-    labels:
-      agent:
-        compute:
-          <<: *openstackComputeNodeSelector
-        compute_ironic:
-          <<: *openstackComputeNodeSelector
-      api_metadata:
-        <<: *openstackControlNodeSelector
-      conductor:
-        <<: *openstackControlNodeSelector
-      consoleauth:
-        <<: *openstackControlNodeSelector
-      job:
-        <<: *openstackControlNodeSelector
-      novncproxy:
-        <<: *openstackControlNodeSelector
-      osapi:
-        <<: *openstackControlNodeSelector
-      placement:
-        <<: *openstackControlNodeSelector
-      scheduler:
-        <<: *openstackControlNodeSelector
-      spiceproxy:
-        <<: *openstackControlNodeSelector
-    network:
-      osapi:
-        ingress:
-          annotations:
-            nginx.org/rewrites: "serviceName=nova-api rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "nova-api"
-{{- end }}
-      metadata:
-        ingress:
-          annotations:
-            nginx.org/rewrites: "serviceName=nova-metadata rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "nova-metadata"
-{{- end }}
-      novncproxy:
-        ingress:
-          annotations:
-            nginx.org/rewrites: "serviceName=nova-novncproxy rewrite=/"
-{{- if $openstackEnableTLS }}
-            nginx.org/ssl-services: "nova-novncproxy"
-{{- end }}
-            nginx.org/websocket-services: nova-novncproxy
-      #placement:
-      #  ingress:
-      #    annotations:
-      #      nginx.org/rewrites: "serviceName=placement-api rewrite=/"
-{{- if $openstackEnableTLS }}
-      #      nginx.org/ssl-services: "placement-api"
-{{- end }}
-    endpoints:
-{{- if $openstackEnableTLS }}
+  - endpoints:
       identity:
         scheme:
           default: http
-{{- end }}
-      oslo_db_api:
-        auth:
-          admin:
-            username: {{ $credentials.database.root.user | quote }}
-            password: {{ $credentials.database.root.pass | quote }}
-          nova:
-            username: {{ $credentials.database.nova.user | quote }}
-            password: {{ $credentials.database.nova.pass | quote }}
-        hosts:
-          default: {{ $credentials.database.root.host | quote }}
-        scheme: {{ $credentials.database.root.scheme | quote }}
-        port:
-          mysql:
-            default: {{ $credentials.database.root.port }}
-      oslo_db_cell0:
-        auth:
-          admin:
-            username: {{ $credentials.database.root.user | quote }}
-            password: {{ $credentials.database.root.pass | quote }}
-          nova:
-            username: {{ $credentials.database.nova.user | quote }}
-            password: {{ $credentials.database.nova.pass | quote }}
-        hosts:
-          default: {{ $credentials.database.root.host | quote }}
-        scheme: {{ $credentials.database.root.scheme | quote }}
-        port:
-          mysql:
-            default: {{ $credentials.database.root.port }}
-{{- if $openstackEnableTLS }}
       compute:
         host_fqdn_override:
           default:
@@ -1638,11 +1611,117 @@ releases:
         #  placement:
         #    public: nova-placement-tls
         #    internal: nova-placement-tls
-{{- end }}
     manifests:
-{{- if $openstackEnableTLS }}
       certificates: true
+    #network:
+    #  osapi:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-api"
+    #  metadata:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-metadata"
+    #  novncproxy:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-novncproxy"
+    #  placement:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "placement-api"
 {{- end }}
+  - *openstackCommon
+  - images:
+      tags:
+        nova_api: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_cell_setup: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_cell_setup_init: {{ $registryAddress }}/openstack/heat:{{ $openstackTag }}
+        nova_compute: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_compute_ironic: docker.io/kolla/ubuntu-source-nova-compute-ironic:{{ $openstackVersion }}
+        nova_compute_ssh: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_conductor: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_consoleauth: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_db_sync: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_novncproxy: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ $openstackVersion }}
+        nova_placement: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_scheduler: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_service_cleaner: {{ $registryAddress }}/openstack/ceph-config-helper:{{ $openstackTag }}
+        nova_spiceproxy: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+        nova_spiceproxy_assets: {{ $registryAddress }}/openstack/nova:{{ $openstackTag }}
+    labels:
+      agent:
+        compute:
+          <<: *openstackComputeNodeSelector
+        compute_ironic:
+          <<: *openstackComputeNodeSelector
+      api_metadata:
+        <<: *openstackControlNodeSelector
+      conductor:
+        <<: *openstackControlNodeSelector
+      consoleauth:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      novncproxy:
+        <<: *openstackControlNodeSelector
+      osapi:
+        <<: *openstackControlNodeSelector
+      placement:
+        <<: *openstackControlNodeSelector
+      scheduler:
+        <<: *openstackControlNodeSelector
+      spiceproxy:
+        <<: *openstackControlNodeSelector
+    network:
+      osapi:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-api rewrite=/"
+      metadata:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-metadata rewrite=/"
+      novncproxy:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-novncproxy rewrite=/"
+            nginx.org/websocket-services: nova-novncproxy
+      #placement:
+      #  ingress:
+      #    annotations:
+      #      nginx.org/rewrites: "serviceName=placement-api rewrite=/"
+    endpoints:
+      oslo_db_api:
+        auth:
+          admin:
+            username: {{ $credentials.database.root.user | quote }}
+            password: {{ $credentials.database.root.pass | quote }}
+          nova:
+            username: {{ $credentials.database.nova.user | quote }}
+            password: {{ $credentials.database.nova.pass | quote }}
+        hosts:
+          default: {{ $credentials.database.root.host | quote }}
+        scheme: {{ $credentials.database.root.scheme | quote }}
+        port:
+          mysql:
+            default: {{ $credentials.database.root.port }}
+      oslo_db_cell0:
+        auth:
+          admin:
+            username: {{ $credentials.database.root.user | quote }}
+            password: {{ $credentials.database.root.pass | quote }}
+          nova:
+            username: {{ $credentials.database.nova.user | quote }}
+            password: {{ $credentials.database.nova.pass | quote }}
+        hosts:
+          default: {{ $credentials.database.root.host | quote }}
+        scheme: {{ $credentials.database.root.scheme | quote }}
+        port:
+          mysql:
+            default: {{ $credentials.database.root.port }}
+    manifests:
       deployment_consoleauth: false
       deployment_placement: false
       ingress_placement: false
@@ -1655,6 +1734,9 @@ releases:
       service_ingress_placement: false
       service_placement: false
     conf:
+      ceph:
+        cinder:
+          user: admin
       rabbitmq:
         policies:
         - vhost: "nova"
@@ -1696,6 +1778,14 @@ releases:
         novncproxy: 1
       use_fqdn:
         compute: false
+    bootstrap:
+      structured:
+        flavors:
+          options:
+{{- range list "m1_tiny" "m1_small" "m1_medium" "m1_large" "m1_xlarge" }}
+            {{ . }}:
+              id: {{ . }}
+{{- end }}
 
 - name: placement
   namespace: {{ $openstackNamespace }}
@@ -1712,8 +1802,8 @@ releases:
   - images:
       tags:
         db_migrate: quay.io/airshipit/porthole-postgresql-utility:latest-{{ $openstackBaseImage }}
-        placement: {{ $registryAddress }}/placement:{{ $openstackTag }}
-        placement_db_sync: {{ $registryAddress }}/placement:{{ $openstackTag }}
+        placement: {{ $registryAddress }}/openstack/placement:{{ $openstackTag }}
+        placement_db_sync: {{ $registryAddress }}/openstack/placement:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1759,8 +1849,8 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        barbican_db_sync: {{ $registryAddress }}/barbican:{{ $openstackTag }}
-        barbican_api: {{ $registryAddress }}/barbican:{{ $openstackTag }}
+        barbican_db_sync: {{ $registryAddress }}/openstack/barbican:{{ $openstackTag }}
+        barbican_api: {{ $registryAddress }}/openstack/barbican:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1789,11 +1879,11 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        octavia_db_sync: {{ $registryAddress }}/octavia:{{ $openstackTag }}
-        octavia_api: {{ $registryAddress }}/octavia:{{ $openstackTag }}
-        octavia_worker: {{ $registryAddress }}/octavia:{{ $openstackTag }}
-        octavia_housekeeping: {{ $registryAddress }}/octavia:{{ $openstackTag }}
-        octavia_health_manager: {{ $registryAddress }}/octavia:{{ $openstackTag }}
+        octavia_db_sync: {{ $registryAddress }}/openstack/octavia:{{ $openstackTag }}
+        octavia_api: {{ $registryAddress }}/openstack/octavia:{{ $openstackTag }}
+        octavia_worker: {{ $registryAddress }}/openstack/octavia:{{ $openstackTag }}
+        octavia_housekeeping: {{ $registryAddress }}/openstack/octavia:{{ $openstackTag }}
+        octavia_health_manager: {{ $registryAddress }}/openstack/octavia:{{ $openstackTag }}
         octavia_health_manager_init: docker.io/kolla/ubuntu-source-octavia-health-manager:{{ $openstackVersion }}
         openvswitch_vswitchd: docker.io/kolla/centos-source-openvswitch-vswitchd:{{ $openstackVersion }}
     labels:
@@ -1859,13 +1949,13 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        designate_api: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_central: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_db_sync: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_mdns: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_producer: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_sink: {{ $registryAddress }}/designate:{{ $openstackTag }}
-        designate_worker: {{ $registryAddress }}/designate:{{ $openstackTag }}
+        designate_api: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_central: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_db_sync: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_mdns: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_producer: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_sink: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
+        designate_worker: {{ $registryAddress }}/openstack/designate:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1909,9 +1999,9 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        magnum_api: {{ $registryAddress }}/magnum:{{ $openstackTag }}
-        magnum_conductor: {{ $registryAddress }}/magnum:{{ $openstackTag }}
-        magnum_db_sync: {{ $registryAddress }}/magnum:{{ $openstackTag }}
+        magnum_api: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
+        magnum_conductor: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
+        magnum_db_sync: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1934,10 +2024,10 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        senlin_api: {{ $registryAddress }}/magnum:{{ $openstackTag }}
-        senlin_db_sync: {{ $registryAddress }}/magnum:{{ $openstackTag }}
-        senlin_engine: {{ $registryAddress }}/magnum:{{ $openstackTag }}
-        senlin_engine_cleaner: {{ $registryAddress }}/magnum:{{ $openstackTag }}
+        senlin_api: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
+        senlin_db_sync: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
+        senlin_engine: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
+        senlin_engine_cleaner: {{ $registryAddress }}/openstack/magnum:{{ $openstackTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1966,8 +2056,8 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        horizon_db_sync: {{ $registryAddress }}/horizon:{{ $openstackTag }}
-        horizon: {{ $registryAddress }}/horizon:{{ $openstackTag }}
+        horizon_db_sync: {{ $registryAddress }}/openstack/horizon:{{ $openstackTag }}
+        horizon: {{ $registryAddress }}/openstack/horizon:{{ $openstackTag }}
     labels:
       dashboard:
         <<: *openstackControlNodeSelector

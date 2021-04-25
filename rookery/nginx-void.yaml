@@ -1,0 +1,14 @@
+conf:
+  nginx: |
+    worker_processes 1;
+    daemon off;
+    user nginx;
+    events {
+      worker_connections 1024;
+    }
+    http {
+      server {
+        server_name _;
+        listen 127.0.0.1:31337;
+      }
+    }
