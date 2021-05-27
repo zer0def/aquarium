@@ -105,8 +105,8 @@ Logical components are split into namespaces according to the following logic:
 
 - Kata's available only through Kubedee
 - Kubedee: Registry proxy not deployed as an LXD container, making Docker a harder dependency than it genuinely needs to be
-- cluster-wide pod security policies are just awful
 - most likely inconsistent whitespace handling, deal with it
+- ~~cluster-wide pod security policies are just awful~~ ripped out due to [deprecation in K8S 1.21](https://kubernetes.io/blog/2021/04/06/podsecuritypolicy-deprecation-past-present-and-future/), none until something better comes along
 
 ## Legalese
 

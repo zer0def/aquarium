@@ -95,18 +95,6 @@ registry_proxy_post(){
 }
 
 launch_cluster_post(){
-  # PSP
-  local ALLOW_ALL_PSP TMP_PSP="$(mktemp)"
-  : ${ALLOW_ALL_PSP:=0}
-  PRIVILEGED_PSP=99-privileged
-  RESTRICTED_PSP=01-restricted
-  [ "${ALLOW_ALL_PSP}" -eq 0 ] && DEFAULT_PSP="${PRIVILEGED_PSP}" || DEFAULT_PSP="${RESTRICTED_PSP}"
-  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <"${MYDIR}/utils/manifests/priviledged-psp.yml.shtpl" >>"${TMP_PSP}"
-  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <"${MYDIR}/utils/manifests/restricted-psp.yml.shtpl" >>"${TMP_PSP}"
-  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <"${MYDIR}/utils/manifests/default-psp-crb.yml.shtpl" >>"${TMP_PSP}"
-  until kubectl apply -f "${TMP_PSP}" &>/dev/null; do :; done
-  rm "${TMP_PSP}"
-
   [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post ||:
 }
 
@@ -189,7 +177,7 @@ EOF
     --k3s-agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
     --k3s-server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
     --k3s-server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --k3s-server-arg '--kube-apiserver-arg=enable-admission-plugins=PodSecurityPolicy,NodeRestriction' \
+    --k3s-server-arg '--kube-apiserver-arg=enable-admission-plugins=NodeRestriction' \
     -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
     -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
@@ -305,7 +293,7 @@ install_service_mesh(){
   echo "Installing Istio Resources…"
 
   # secure Citadel Node Agent's SDS unix socket
-  NAMESPACES_NETWORK="${NAMESPACES_NETWORK}" envsubst <${MYDIR}/utils/manifests/istio-psp.yml.shtpl | kubectl apply -f-
+  #NAMESPACES_NETWORK="${NAMESPACES_NETWORK}" envsubst <${MYDIR}/utils/manifests/istio-psp.yml.shtpl | kubectl apply -f-
 
   # be sure to prefix configuration configuration keys with `values.` when using `istioctl`
   #istioctl manifest apply --wait \
