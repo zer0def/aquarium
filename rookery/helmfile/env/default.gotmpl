@@ -1,0 +1,188 @@
+helmTimeout: {{ default 86400 (env "HELM_TIMEOUT") }}
+registry: {{ default "kubedee-rookery-registry:5000" (env "LOCAL_REGISTRY_ADDRESS") }}
+memcachedCluster: memcached
+backingStorageClass: openebs-device
+
+credentials:
+  database:
+    root:
+      scheme: {{ default "postgresql+psycopg2" (env "DB_SCHEME") }}
+      host: {{ default "patroni" (env "DB_HOST") }}
+      port: {{ default 5432 (env "DB_PORT") }}
+      user: {{ default "postgres" (env "DB_ROOT_USER") }}
+      pass: {{ default "tea" (env "DB_ROOT_PASS") }}
+    keystone:
+      name: {{ default "keystone" (env "DB_KEYSTONE_NAME") }}
+      user: {{ default "keystone" (env "DB_KEYSTONE_USER") }}
+      pass: {{ default "keystone" (env "DB_KEYSTONE_PASS") }}
+    glance:
+      name: {{ default "glance" (env "DB_GLANCE_NAME") }}
+      user: {{ default "glance" (env "DB_GLANCE_USER") }}
+      pass: {{ default "glance" (env "DB_GLANCE_PASS") }}
+    cinder:
+      name: {{ default "cinder" (env "DB_CINDER_NAME") }}
+      user: {{ default "cinder" (env "DB_CINDER_USER") }}
+      pass: {{ default "cinder" (env "DB_CINDER_PASS") }}
+    nova:
+      name: {{ default "nova" (env "DB_NOVA_NAME") }}
+      user: {{ default "nova" (env "DB_NOVA_USER") }}
+      pass: {{ default "nova" (env "DB_NOVA_PASS") }}
+    nova_api:
+      name: {{ default "nova_api" (env "DB_NOVA_API_NAME") }}
+      user: {{ default "nova_api" (env "DB_NOVA_API_USER") }}
+      pass: {{ default "nova_api" (env "DB_NOVA_API_PASS") }}
+    nova_cell0:
+      name: {{ default "nova_cell0" (env "DB_NOVA_CELL0_NAME") }}
+      user: {{ default "nova_cell0" (env "DB_NOVA_CELL0_USER") }}
+      pass: {{ default "nova_cell0" (env "DB_NOVA_CELL0_PASS") }}
+    neutron:
+      name: {{ default "neutron" (env "DB_NEUTRON_NAME") }}
+      user: {{ default "neutron" (env "DB_NEUTRON_USER") }}
+      pass: {{ default "neutron" (env "DB_NEUTRON_PASS") }}
+    heat:
+      name: {{ default "heat" (env "DB_HEAT_NAME") }}
+      user: {{ default "heat" (env "DB_HEAT_USER") }}
+      pass: {{ default "heat" (env "DB_HEAT_PASS") }}
+    horizon:
+      name: {{ default "horizon" (env "DB_HORIZON_NAME") }}
+      user: {{ default "horizon" (env "DB_HORIZON_USER") }}
+      pass: {{ default "horizon" (env "DB_HORIZON_PASS") }}
+    barbican:
+      name: {{ default "barbican" (env "DB_BARBICAN_NAME") }}
+      user: {{ default "barbican" (env "DB_BARBICAN_USER") }}
+      pass: {{ default "barbican" (env "DB_BARBICAN_PASS") }}
+    octavia:
+      name: {{ default "octavia" (env "DB_OCTAVIA_NAME") }}
+      user: {{ default "octavia" (env "DB_OCTAVIA_USER") }}
+      pass: {{ default "octavia" (env "DB_OCTAVIA_PASS") }}
+    placement:
+      name: {{ default "placement" (env "DB_PLACEMENT_NAME") }}
+      user: {{ default "placement" (env "DB_PLACEMENT_USER") }}
+      pass: {{ default "placement" (env "DB_PLACEMENT_PASS") }}
+    designate:
+      name: {{ default "designate" (env "DB_DESIGNATE_NAME") }}
+      user: {{ default "designate" (env "DB_DESIGNATE_USER") }}
+      pass: {{ default "designate" (env "DB_DESIGNATE_PASS") }}
+    powerdns:
+      name: {{ default "powerdns" (env "DB_POWERDNS_NAME") }}
+      user: {{ default "powerdns" (env "DB_POWERDNS_USER") }}
+      pass: {{ default "powerdns" (env "DB_POWERDNS_PASS") }}
+    magnum:
+      name: {{ default "magnum" (env "DB_MAGNUM_NAME") }}
+      user: {{ default "magnum" (env "DB_MAGNUM_USER") }}
+      pass: {{ default "magnum" (env "DB_MAGNUM_PASS") }}
+    senlin:
+      name: {{ default "senlin" (env "DB_SENLIN_NAME") }}
+      user: {{ default "senlin" (env "DB_SENLIN_USER") }}
+      pass: {{ default "magnum" (env "DB_SENLIN_PASS") }}
+
+  rabbitmq:
+    root:
+      host: {{ default "rabbitmq" (env "RMQ_HOST") }}
+      user: {{ default "rabbitmq" (env "RMQ_ROOT_USER") }}
+      pass: {{ default "rabbitmq" (env "RMQ_ROOT_PASS") }}
+      cookie: {{ default "BYWVYUKFWOTNDQNLDTDN" (env "RMQ_COOKIE") }}
+    keystone:
+      user: {{ default "keystone" (env "RMQ_KEYSTONE_USER") }}
+      pass: {{ default "keystone" (env "RMQ_KEYSTONE_PASS") }}
+    glance:
+      user: {{ default "glance" (env "RMQ_GLANCE_USER") }}
+      pass: {{ default "glance" (env "RMQ_GLANCE_PASS") }}
+    cinder:
+      user: {{ default "cinder" (env "RMQ_CINDER_USER") }}
+      pass: {{ default "cinder" (env "RMQ_CINDER_PASS") }}
+    nova:
+      user: {{ default "nova" (env "RMQ_NOVA_USER") }}
+      pass: {{ default "nova" (env "RMQ_NOVA_PASS") }}
+    neutron:
+      user: {{ default "neutron" (env "RMQ_NEUTRON_USER") }}
+      pass: {{ default "neutron" (env "RMQ_NEUTRON_PASS") }}
+    barbican:
+      user: {{ default "barbican" (env "RMQ_BARBICAN_USER") }}
+      pass: {{ default "barbican" (env "RMQ_BARBICAN_PASS") }}
+    heat:
+      user: {{ default "heat" (env "RMQ_HEAT_USER") }}
+      pass: {{ default "heat" (env "RMQ_HEAT_PASS") }}
+    octavia:
+      user: {{ default "octavia" (env "RMQ_OCTAVIA_USER") }}
+      pass: {{ default "octavia" (env "RMQ_OCTAVIA_PASS") }}
+    designate:
+      user: {{ default "designate" (env "RMQ_DESIGNATE_USER") }}
+      pass: {{ default "designate" (env "RMQ_DESIGNATE_PASS") }}
+    magnum:
+      user: {{ default "magnum" (env "RMQ_MAGNUM_USER") }}
+      pass: {{ default "magnum" (env "RMQ_MAGNUM_PASS") }}
+    senlin:
+      user: {{ default "senlin" (env "RMQ_SENLIN_USER") }}
+      pass: {{ default "senlin" (env "RMQ_SENLIN_PASS") }}
+
+versions:
+  images:
+    openebs: 2.9.0
+  charts:
+    mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
+    memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
+    rook: {{ default "v1.4.8" (env "CHART_VERSION_ROOK") }}
+    mysql: {{ default "6.14.12" (env "CHART_VERSION_MYSQL") }}
+
+ingress:
+  namespace: {{ default "openstack" (env "OPENSTACK_NAMESPACE") }}
+  class: nginx
+
+rook:
+  namespace: rook-ceph
+  cluster: my-cluster
+  hostBasedOSDs: true
+  # pod CIDR space or host network space if cluster `network.hostNetwork: true`
+  network: {{ default "10.244.0.0/16" (env "ROOK_NETWORK") }}
+  replicaPool: replicapool
+  rbd:
+    enabled: true
+  cephfs:
+    # need to disable CephFS, when creating Glance with `storage: rbd`
+    enabled: false
+    name: myfs
+    # https://github.com/rook/rook/issues/6482#issuecomment-715596792
+    nfs: false
+  object:
+    enabled: false
+    store:
+      name: my-store
+      storageClass: rook-ceph-bucket
+
+patroni:
+  replicas: {{ default 3 (env "RDBMS_COUNT") }}
+  bouncers: 1
+  image: "registry.opensource.zalan.do/acid/spilo-13"
+  tag: "2.0-p7"
+
+{{ $osCommonNodeSelector := dict "node_selector_key" "node-role.kubernetes.io/node" "node_selector_value" "" }}
+openstack:
+  namespace: {{ default "openstack" (env "OPENSTACK_NAMESPACE") }}
+  version: {{ default "wallaby" (env "OS_VERSION") }}
+  baseImage: {{ default "ubuntu_bionic" (env "BASE_IMAGE") }}
+  neutron:
+    extBridge:
+      name: br-ex
+      network: public
+      cidr: "172.24.4.0/24"
+      addr: "172.24.4.1/24"
+      iface: eth0
+  nodeSelectors:
+    common:
+      {{ toYaml $osCommonNodeSelector | nindent 6 }}
+    neutronOvs:
+      {{ toYaml $osCommonNodeSelector | nindent 6 }}
+  rmq:
+    replicas: {{ default 3 (env "RMQ_NODE_COUNT") }}
+  tls:
+    enabled: true
+    certIssuers:
+      openstack:
+        name: openstack-ca
+        kind: Issuer
+      selfsigned:
+        name: selfsigned
+        kind: ClusterIssuer
+    secrets:
+      database: "openstack-on-pg"

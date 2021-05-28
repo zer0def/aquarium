@@ -1,9 +1,9 @@
-# Rookery - Openstack+Ceph-on-K8S dev environment on LXD VMs via Kubedee
+# Rookery - (Openstack+Ceph)/K8S dev environment on LXD VMs via Kubedee
 
 ### Usage
 
 ```
-rookery - Openstack+Ceph-on-K8S dev environment on LXD VMs via Kubedee
+rookery - (Openstack+Ceph)/K8S dev environment on LXD VMs via Kubedee
 
 Usage: rookery/rookery.sh [options] <up|down>
 
@@ -13,11 +13,11 @@ Options:
   -n <num>, --num <num>                number of workers
                                        (default: 1, env: NUM_WORKERS)
   -V <tag>, --tag <tag>                Kubernetes version to use
-                                       (default: 1.20.1, env: K8S_VERSION)
+                                       (default: 1.21.1, env: K8S_VERSION)
   -s <pool>, --storage-pool <pool>     LXD storage pool to use for the K8S cluster
                                        (default: default, env: LXD_STORAGE_POOL)
   -o <tag>, --openstack-version <tag>  Openstack version to deploy
-                                       (default: victoria, env: OS_VERSION)
+                                       (default: wallaby, env: OS_VERSION)
   -b <base>, --base-image <base>       base LOCI image to use for Openstack
                                        images (default: ubuntu_bionic, env: BASE_IMAGE)
   -c <mem>, --controller-mem <mem>     memory to allocate towards K8S controller

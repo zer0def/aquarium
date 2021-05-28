@@ -1,0 +1,343 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+repositories:
+- name: openebs  # https://github.com/openebs/charts
+  url: "https://openebs.github.io/charts"
+- name: minio  # https://github.com/minio/charts
+  url: "https://helm.min.io"
+- name: dandy-developer  # https://github.com/DandyDeveloper/charts
+  url: "https://dandydeveloper.github.io/charts"
+- name: harbor  # https://github.com/goharbor/harbor-helm
+  url: "https://helm.goharbor.io"
+- name: sentry  # https://github.com/sentry-kubernetes/charts
+  url: "https://sentry-kubernetes.github.io/charts"
+
+templates:
+  harbor:
+    values:
+    - component: &harborVersion
+        image:
+          tag: v{{ .Values.versions.images.harbor }}
+
+releases:
+- name: {{ .Values.releases.minio }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: minio/minio
+  version: {{ .Values.versions.charts.minio }}
+  installed: {{ and .Values.enables.storage .Values.enables.minio }}
+{{- if ne .Values.k8sRuntime "k3d" }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - fullnameOverride: {{ .Values.releases.minio | quote }}
+    accessKey: {{ .Values.minio.accessKey | quote }}
+    secretKey: {{ .Values.minio.secretKey | quote }}
+    service:
+      port: {{ .Values.minio.servicePort }}
+      clusterIP: None
+    persistence:  # parameterize based on presence of OpenEBS
+      enabled: false
+    defaultBucket:
+      name: {{ .Values.minio.defaultBucket | quote }}
+      enabled: true
+    resources:
+      requests:
+        memory: 256Mi
+{{- if and .Values.enables.storage .Values.enables.minio }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      MC_NAME="mc-${RANDOM}"
+      kubectl -n {{ .Values.namespaces.storage }} apply -f- <<EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${MC_NAME}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: minio-client
+            release: ${MC_NAME}
+        template:
+          metadata:
+            labels:
+              app: minio-client
+              release: ${MC_NAME}
+          spec:
+            containers:
+            - name: mc
+              image: minio/mc
+              command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
+      EOF
+      until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
+      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc "mc config host add {{ .Values.minio.host }} http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }} {{ .Values.minio.accessKey }} {{ .Values.minio.secretKey }}"
+      echo "MinIO is available under http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }} with access key \"{{ .Values.minio.accessKey }}\", secret key \"{{ .Values.minio.secretKey }}\" and default bucket \"{{ .Values.minio.defaultBucket }}\"."
+{{- end }}
+
+{{- $patroniHashedName := printf "%s-%s" .Values.releases.patroni (printf "%s:%s" .Values.patroni.image .Values.patroni.tag | sha256sum | trunc 8) }}
+- name: {{ .Values.releases.patroni }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/incubator/patroni"
+  installed: {{ .Values.enables.storage }}
+  needs:
+{{- if ne .Values.k8sRuntime "k3d" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
+  values:
+  - fullnameOverride: {{ .Values.releases.patroni | quote }}
+    replicaCount: {{ .Values.patroni.replicas }}
+    image:
+      repository: {{ .Values.patroni.image }}
+      tag: {{ .Values.patroni.tag }}
+    pgbouncer:
+      replicaCount: {{ .Values.patroni.bouncers }}
+      tls:
+        server:
+          issuerRef:
+            name: selfsigned-ca
+            kind: Issuer
+          sslmode: verify-full
+        client:
+          issuerRef:
+            name: selfsigned-ca
+            kind: Issuer
+    tls:
+      issuerRef:
+        name: selfsigned-ca
+        kind: Issuer
+    affinity:
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: "kubernetes.io/hostname"
+            namespaceSelector: {}
+            labelSelector:
+              matchLabels:
+                release: {{ $patroniHashedName }}
+    env:
+      ALLOW_NOSSL: "true"
+    spiloConfiguration:
+      bootstrap:
+        dcs:
+          synchronous_mode: true
+          #synchronous_mode_strict: true
+          synchronous_node_count: {{ sub .Values.patroni.replicas 1 }}
+        initdb:
+        - data-checksums
+        - locale: en_US.UTF-8
+        - encoding: UTF-8
+      postgresql:
+        use_slots: true
+        remove_data_directory_on_diverged_timelines: true
+        #use_pg_rewind: false
+        remove_data_directory_on_rewind_failure: true
+        parameters:
+          log_destination: stderr
+          logging_collector: "off"
+          shared_preload_libraries: citus,timescaledb
+          timescaledb.license: timescale  # it's a trap!
+          timescaledb.telemetry_level: "off"
+    metrics:
+      postgresql:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+      patroni:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+    databases:
+    - name: {{ .Values.harbor.db.core.name | quote }}
+      user: {{ .Values.harbor.db.core.user | quote }}
+      pass: {{ .Values.harbor.db.core.pass | quote }}
+    - name: {{ .Values.harbor.db.notaryServer.name | quote }}
+      user: {{ .Values.harbor.db.core.user | quote }}
+      pass: {{ .Values.harbor.db.core.pass | quote }}
+      #user: {{ .Values.harbor.db.notaryServer.user | quote }}
+      #pass: {{ .Values.harbor.db.notaryServer.pass | quote }}
+    - name: {{ .Values.harbor.db.notarySigner.name | quote }}
+      user: {{ .Values.harbor.db.core.user | quote }}
+      pass: {{ .Values.harbor.db.core.pass | quote }}
+      #user: {{ .Values.harbor.db.notarySigner.user | quote }}
+      #pass: {{ .Values.harbor.db.notarySigner.pass | quote }}
+    - name: {{ .Values.kong.db.name | quote }}
+      user: {{ .Values.kong.db.user | quote }}
+      pass: {{ .Values.kong.db.pass | quote }}
+    - name: {{ .Values.sentry.db.name | quote }}
+      user: {{ .Values.sentry.db.user | quote }}
+      pass: {{ .Values.sentry.db.pass | quote }}
+    - name: {{ .Values.timescale.db.name | quote }}
+      user: {{ .Values.timescale.db.user | quote }}
+      pass: {{ .Values.timescale.db.pass | quote }}
+
+- name: {{ .Values.releases.redis }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: dandy-developer/redis-ha
+  installed: {{ .Values.enables.storage }}
+{{- if ne .Values.k8sRuntime "k3d" }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - fullnameOverride: {{ .Values.releases.redis | quote }}
+    hardAntiAffinity: false
+    replicas: {{ .Values.redis.replicas.redis }}
+    image:
+      tag: 6-alpine
+    haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
+      enabled: true
+      replicas: {{ .Values.redis.replicas.haproxy }}
+      stickyBalancing: true
+      hardAntiAffinity: false
+      readOnly:
+        enabled: true
+        port: {{ .Values.redis.ports.readonly }}
+      metrics:
+        enabled: true
+    redis:
+      port: {{ .Values.redis.ports.readwrite }}
+    sentinel:
+      port: {{ .Values.redis.ports.sentinel }}
+    exporter:
+      enabled: true
+      tag: v1.12.0-alpine
+      extraArgs:  # ??
+        ping-on-connect: true
+        redis-only-metrics: true
+      serviceMonitor:
+        enabled: true
+    auth: true
+    redisPassword: {{ .Values.redis.password }}
+
+- name: {{ .Values.releases.harbor }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: harbor/harbor
+  version: {{ .Values.versions.charts.harbor }}
+  installed: {{ and .Values.enables.storage .Values.enables.minio }}
+  #installed: false
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  values:
+  - nameOverride: {{ .Values.releases.harbor | quote }}
+    # default admin username for Harbor is `admin`
+    harborAdminPassword: {{ .Values.harbor.adminPassword | quote }}
+    externalURL: "https://{{ .Values.harbor.coreHostname }}"
+    #externalURL: "https://{{ .Values.releases.harbor }}-{{ .Values.releases.harbor }}-core.{{ .Values.namespaces.storage }}.svc"
+    expose:  # by default, service is `ingress`
+      tls:
+        enabled: true
+      #  auto:
+      #    commonName: {{ .Values.harbor.coreHostname }}
+      #type: nodePort
+      #nodePort:
+      #  ports:
+      #    http:
+      #      nodePort: {{ .Values.harbor.httpNodePort }}
+      ingress:
+        annotations:  # be sure to suffix registry with `:80` when pushing images
+          nginx.org/client-max-body-size: "0"
+          ingress.kubernetes.io/ssl-redirect: "false"
+          nginx.ingress.kubernetes.io/ssl-redirect: "false"
+        hosts:
+          core: {{ .Values.harbor.coreHostname }}
+    persistence:
+      imageChartStorage:
+        disableredirect: true
+        type: s3
+        s3:
+          accesskey: {{ .Values.minio.accessKey | quote }}
+          secretkey: {{ .Values.minio.secretKey | quote }}
+          bucket: {{ .Values.minio.defaultBucket | quote }}
+          # if using insecure object storage endpoints, you need to prefix it with `http://` protocol for chartmuseum to not barf
+          secure: false
+          regionendpoint: "http://minio.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+    database:
+      type: external
+      external:
+        host: {{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc
+        username: {{ .Values.harbor.db.core.user | quote }}
+        password: {{ .Values.harbor.db.core.pass | quote }}
+        coreDatabase: {{ .Values.harbor.db.core.name | quote }}
+        notaryServerDatabase: {{ .Values.harbor.db.notaryServer.name | quote }}
+        notarySignerDatabase: {{ .Values.harbor.db.notarySigner.name | quote }}
+        #sslmode: require
+    redis:
+      type: external
+      external:
+        addr: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+        #host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
+        password: {{ .Values.redis.password | quote }}
+    nginx:
+      <<: *harborVersion
+    portal:
+      <<: *harborVersion
+    core:
+      <<: *harborVersion
+    jobservice:
+      <<: *harborVersion
+      jobLogger:
+      - database
+      #- file
+      #- stdout
+    registry:
+      registry:
+        <<: *harborVersion
+      controller:
+        <<: *harborVersion
+    chartmuseum:
+      <<: *harborVersion
+    trivy:
+      <<: *harborVersion
+    notary:
+      server:
+        <<: *harborVersion
+      signer:
+        <<: *harborVersion
+
+- name: {{ .Values.releases.sentry }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: sentry/sentry
+  installed: {{ .Values.enables.storage }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  values:
+  - sentry:
+      worker:
+        replicas: 1
+    images:
+      sentry:
+        tag: {{ .Values.versions.images.sentry }}
+    postgresql:
+      enabled: false
+    externalPostgresql:
+      host: {{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc
+      username: {{ .Values.sentry.db.user | quote }}
+      password: {{ .Values.sentry.db.pass | quote }}
+      database: {{ .Values.sentry.db.name | quote }}
+    rabbitmq:
+      enabled: false
+    redis:
+      enabled: false
+    externalRedis:
+      host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
+      password: {{ .Values.redis.password | quote }}
+    user:
+      email: {{ .Values.sentry.admin.user }}
+      password: {{ .Values.sentry.admin.password }}

@@ -1,5 +1,6 @@
 #!/bin/bash -e
-MYDIR="$(dirname "$(readlink -f "${0}")")"
+export MYDIR="$(dirname "$(readlink -f "${0}")")"
+[ -z "${SCRIPT_DEBUG}" ] || export KUBEDEE_DEBUG=0
 . "${MYDIR}/../common"
 
 usage(){
@@ -34,7 +35,7 @@ EOF
 
 declare -A STABLE_VERSION_REQUIREMENTS=(
   ['victoria']='neutron-lib<2.7.0'
-  ['wallaby']='eventlet<0.30.3 zstd<1.5 flask<2.0 typing-extensions<3.10'
+  ['wallaby']='eventlet<0.30.3 zstd<1.5 flask<2.0 typing-extensions<3.10 XStatic-Angular<1.8.2.1'
 )
 
 OS_PROFILES=(infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt)
@@ -136,7 +137,7 @@ up(){
     --controller-limits-memory "${CONTROLLER_MEMORY_SIZE}" \
     --worker-limits-memory "${WORKER_MEMORY_SIZE}" \
     --storage-pool "${LXD_STORAGE_POOL}" \
-    --rootfs-size "30GiB"
+    --rootfs-size "24GiB"
 
   export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" \
     LOCAL_REGISTRY_PORT="5000"
