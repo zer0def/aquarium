@@ -1,0 +1,254 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+repositories:
+# deprecated
+- name: stable
+  url: "https://charts.helm.sh/stable"
+- name: incubator
+  url: "https://charts.helm.sh/incubator"
+
+- name: jetstack  # https://github.com/jetstack/cert-manager/tree/master/deploy/charts/cert-manager
+  url: "https://charts.jetstack.io"
+- name: bitnami  # etcd, https://github.com/bitnami/charts
+  url: "https://charts.bitnami.com/bitnami"
+
+## ingresses
+# ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
+- name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
+  url: "https://helm.nginx.com/stable"
+# ref: https://kubernetes.github.io/ingress-nginx/user-guide/
+- name: kubernetes-nginx  # src: https://github.com/kubernetes/ingress-nginx/tree/master/charts/ingress-nginx
+  url: https://kubernetes.github.io/ingress-nginx
+- name: prometheus-community  # https://github.com/prometheus-community/helm-charts
+  url: "https://prometheus-community.github.io/helm-charts"
+
+# curiosities
+#
+## LOL SSPL-LICENSED SOFTWARE, DO NOT TOUCH
+#- name: elastic  # https://github.com/elastic/helm-charts
+#  url: "https://helm.elastic.co"
+
+- name: grafana-loki  # https://github.com/grafana/loki/tree/master/production/helm
+  url: "https://grafana.github.io/loki/charts"
+- name: rancher
+  url: "https://releases.rancher.com/server-charts/latest"
+- name: yugabyte
+  url: "https://charts.yugabyte.com"
+
+helmDefaults:
+  wait: true
+  timeout: {{ .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+#bases: {}
+#helmFiles:
+#- path: postgres-operator-helmfile.yaml
+#- path: rancher-helmfile.yaml
+templates:
+  openebs:
+    values:
+    - disabledComponent: &openebsLVP
+        enabled: false
+        replicas: 0
+      openebsTag: &openebsTag
+        imageTag: {{ .Values.versions.images.openebs }}
+      openebsNdmTag: &openebsNdmTag
+        imageTag: {{ .Values.versions.images.openebsNdm }}
+
+releases:
+{{- if ne .Values.k8sRuntime "k3d" }}
+- name: {{ .Values.releases.ingressController }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: nginx/nginx-ingress
+  #chart: kubernetes-nginx/ingress-nginx
+  labels:
+    purpose: ingress
+  values:
+  - controller:
+      hostNetwork: false
+      kind: daemonset
+      service:
+        type: NodePort
+      enableCustomResources: false
+      setAsDefaultIngress: true
+
+- name: {{ .Values.releases.openebs }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: openebs/openebs
+  values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
+  - fullnameOverride: {{ .Values.releases.openebs | quote }}
+    #image:  # hopefully a temporary state of affairs
+    #  repository: docker.io/
+    analytics:
+      enabled: false
+    release:
+      version: {{ .Values.versions.images.openebs }}
+    apiserver:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    provisioner:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    localprovisioner:
+      enabled: true
+      replicas: 3
+      <<: *openebsTag
+    snapshotOperator:  # not needed for just local PV
+      <<: *openebsLVP
+      controller:
+        <<: *openebsTag
+      provisioner:
+        <<: *openebsTag
+    webhook:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    jiva:
+      <<: *openebsTag
+    cstor:
+      pool:
+        <<: *openebsTag
+      poolMgmt:
+        <<: *openebsTag
+      target:
+        <<: *openebsTag
+      volumeMgmt:
+        <<: *openebsTag
+    helper:
+      <<: *openebsTag
+    policies:
+      monitoring:
+        <<: *openebsTag
+    ndmOperator:
+      enabled: false
+      <<: *openebsNdmTag
+    ndm:
+      enabled: false
+      <<: *openebsNdmTag
+      filters:
+        {{/* excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ if ne .Values.openebsOmitLoopDevs "," }}{{ .Values.openebsOmitLoopDevs }}{{ end }}" */}}
+        includePaths: "/dev/loop"
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      for i in $(kubectl get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}'); do
+        kubectl annotate sc ${i} storageclass.kubernetes.io/is-default-class-
+      done
+      kubectl apply -f- <<EOF
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      provisioner: openebs.io/local
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Delete
+      metadata:
+        name: openebs-hostpath
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"
+          openebs.io/cas-type: local
+          cas.openebs.io/config: |
+            #hostpath type will create a PV by
+            # creating a sub-directory under the
+            # BASEPATH provided below.
+            - name: StorageType
+              value: "hostpath"
+            #Specify the location (directory) where
+            # where PV(volume) data will be saved.
+            # A sub-directory with pv-name will be
+            # created. When the volume is deleted,
+            # the PV sub-directory will be deleted.
+            #Default value is /var/openebs/local
+            - name: BasePath
+              value: "/var/openebs/local/"
+      #---
+      #apiVersion: storage.k8s.io/v1
+      #kind: StorageClass
+      #provisioner: openebs.io/local
+      #volumeBindingMode: WaitForFirstConsumer
+      #reclaimPolicy: Delete
+      #metadata:
+      #  name: openebs-device
+      #  annotations:
+      #    openebs.io/cas-type: local
+      #    cas.openebs.io/config: |
+      #      #device type will create a PV by
+      #      # issuing a BDC and will extract the path
+      #      # values from the associated BD.
+      #      - name: StorageType
+      #        value: "device"
+      EOF
+{{- end }}
+
+- name: {{ .Values.releases.certManager }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: jetstack/cert-manager
+  version: v{{ .Values.versions.images.certManager }}
+  values:
+  - installCRDs: true
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+{{- range (values .Values.namespaces) }}
+      kubectl get ns {{ . }} || kubectl create ns {{ . }}
+{{- end }}
+      until kubectl -n {{ .Values.namespaces.network }} wait --for condition=ready pod -l app.kubernetes.io/instance=cert-manager,app.kubernetes.io/component=webhook; do sleep 1; done 2>/dev/null ||:
+      until [ $(kubectl get validatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
+      until [ $(kubectl get mutatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
+      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}') -- wget https://cert-manager-webhook.{{ .Values.namespaces.network }}.svc &>/dev/null; do sleep 1; done
+      kubectl apply -f- <<EOF
+      apiVersion: cert-manager.io/v1
+      kind: ClusterIssuer
+      metadata:
+        name: selfsigned
+        namespace: kube-system
+      spec:
+        selfSigned: {}
+{{- range (values .Values.namespaces) }}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: selfsigned-ca-tls
+        namespace: {{ . }}
+      spec:
+        secretName: selfsigned-ca-tls
+        isCA: true
+        commonName: "{{ . }}.svc.cluster.local"
+        dnsNames: ["{{ . }}.svc.cluster.local"]
+        issuerRef:
+          name: selfsigned
+          kind: ClusterIssuer
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Issuer
+      metadata:
+        name: selfsigned-ca
+        namespace: {{ . }}
+      spec:
+        ca:
+          secretName: selfsigned-ca-tls
+{{- end }}
+      EOF
+
+- name: {{ .Values.releases.etcd }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: bitnami/etcd
+  version: {{ .Values.versions.charts.etcd }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  values:
+  - statefulset:
+      replicaCount: 3
+      #podManagementPolicy: OrderedReady
+    auth:
+      rbac:
+        enabled: false
+        rootPassword: etcd

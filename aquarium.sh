@@ -1,5 +1,5 @@
 #!/bin/bash -e
-MYDIR="$(dirname "$(readlink -f "${0}")")"
+export MYDIR="$(dirname "$(readlink -f "${0}")")"
 . "${MYDIR}/common"
 
 # inb4 someone comes out yelling they don't have coreutils installed
@@ -281,7 +281,8 @@ teardown_cluster::kubedee(){
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
-    [v1.20]="v2.2.0"
+    [v1.21]="v2.3.0"
+    [v1.20]="v2.3.0"
     [v1.19]="v2.0.5"
     [v1.18]="v2.0.3"
     [v1.17]="v2.0.0-rc7"

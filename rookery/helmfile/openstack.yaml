@@ -1,0 +1,1664 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+helmDefaults:
+  wait: true
+  timeout: {{ .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+{{- $osTag := printf "%s-%s" .Values.openstack.version .Values.openstack.baseImage }}
+templates:
+  openstack:
+    hooks:
+    - &helmToolkitDependencyFixup
+      events: ["prepare"]
+      command: "/bin/sh"
+      args:
+      - "-xc"
+      #- "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../../openstack-helm-infra/helm-toolkit#g' $(find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm -type f -name requirements.yaml)"
+      - "find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../../openstack-helm-infra/helm-toolkit#g' $(find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm -type f -name requirements.yaml)"
+    values:
+    - &openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+      manifests:
+        certificates: true
+{{- end }}
+      # related: https://docs.openstack.org/nova/latest/reference/threading.html#mysql-access-and-eventlet
+      conf:  # greenlet workaround
+{{- range $asyncSvc := list "keystone" "glance" "cinder" "heat" "neutron" "nova" "barbican" "octavia" "designate" "magnum" "senlin" }}
+        {{ $asyncSvc }}:
+          oslo_messaging_rabbit:
+            heartbeat_timeout_threshold: 0
+  {{- if $.Values.openstack.tls.enabled }}
+            ssl: true
+            ssl_ca_file: /etc/rabbitmq/certs/ca.crt
+            ssl_cert_file: /etc/rabbitmq/certs/tls.crt
+            ssl_key_file: /etc/rabbitmq/certs/tls.key
+  {{- end }}
+{{- end }}
+        logging:
+          logger_root:
+            level: TRACE
+            handlers: stdout
+{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
+          logger_{{ $logger }}:
+            level: TRACE
+{{- end }}
+      endpoints:
+{{/*
+{{- if .Values.openstack.tls.enabled }}
+        identity:
+          auth:
+            admin:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            cinder:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            glance:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            heat:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            heat_trustee:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            heat_stack_user:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            neutron:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            nova:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            placement:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            barbican:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            octavia:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            designate:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            magnum:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            senlin:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+            test:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+          hosts:
+            internal: keystone
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              internal: 443
+        image:
+          hosts:
+            default: glance
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        image_registry:
+          hosts:
+            default: glance-registry
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        volume:
+          hosts:
+            default: cinder
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        volumev2:
+          hosts:
+            default: cinder
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        volumev3:
+          hosts:
+            default: cinder
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        orchestration:
+          hosts:
+            default: heat
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        cloudformation:
+          hosts:
+            default: cloudformation
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        cloudwatch:
+          hosts:
+            default: cloudwatch
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        network:
+          hosts:
+            default: neutron
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        load_balancer:
+          hosts:
+            default: octavia
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        dns:
+          hosts:
+            default: designate
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        baremetal:
+          hosts:
+            default: ironic
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        compute:
+          hosts:
+            default: nova
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+            #novncproxy:
+            #  default: 443
+        compute_metadata:
+          hosts:
+            default: metadata
+          scheme:
+            default: https
+          port:
+            metadata:
+              default: 443
+              public: 443
+        compute_novnc_proxy:
+          hosts:
+            default: novncproxy
+          scheme:
+            default: https
+          port:
+            novnc_proxy:
+              default: 443
+              public: 443
+        compute_spice_proxy:
+          hosts:
+            default: placement
+          scheme:
+            default: https
+          port:
+            spice_proxy:
+              default: 443
+              public: 443
+        placement:
+          hosts:
+            default: placement
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        key_manager:
+          hosts:
+            default: barbican
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+        dashboard:
+          hosts:
+            default: horizon
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+{{- end }}
+*/}}
+        oslo_db:
+          auth:
+            admin:
+              username: {{ $.Values.credentials.database.root.user | quote }}
+              password: {{ $.Values.credentials.database.root.pass | quote }}
+              secret:
+                tls:
+{{- if .Values.openstack.tls.enabled }}
+                  internal: {{ .Values.openstack.tls.secrets.database }}
+{{- else }}
+                  internal: ""
+{{- end }}
+{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
+            {{ $osloDbSvc }}:
+              username: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "user" | quote }}
+              password: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "pass" | quote }}
+{{- end }}
+            horizon:
+              username: {{ $.Values.credentials.database.horizon.user | quote }}
+              password: {{ $.Values.credentials.database.horizon.pass | quote }}
+              engine: "django.db.backends.postgresql"
+          hosts:
+            default: {{ $.Values.credentials.database.root.host | quote }}
+          scheme: {{ $.Values.credentials.database.root.scheme | quote }}
+          port:
+            mysql:
+              default: {{ $.Values.credentials.database.root.port }}
+        oslo_messaging:
+          hosts:
+            #default: "{{ $.Values.credentials.rabbitmq.root.host }}-headless"
+            default: {{ $.Values.credentials.rabbitmq.root.host }}
+          statefulset: null
+            #replicas: {{ $.Values.openstack.rmq.replicas }}
+            #name: rabbitmq
+          auth:
+            admin:
+              username: {{ $.Values.credentials.rabbitmq.root.user | quote }}
+              password: {{ $.Values.credentials.rabbitmq.root.pass | quote }}
+{{- if .Values.openstack.tls.enabled }}
+              secret:
+                tls:
+                  internal: rabbitmq-tls-direct
+{{- end }}
+{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "barbican" "octavia" "designate" "magnum" "senlin" }}
+            {{ $rabbitSvc }}:
+              username: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "user" | quote }}
+              password: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "pass" | quote }}
+{{- end }}
+        oslo_cache:
+          hosts:
+            default: {{ .Values.memcachedCluster }}
+      images:
+        pull_policy: "Always"
+        tags:
+          bootstrap: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          db_drop: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          db_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_user: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_endpoints: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_service: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          nginx: docker.io/nginx:1.18
+      network:
+{{- range $ingressSvc := list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
+        {{ $ingressSvc }}:
+          ingress:
+            annotations:
+              nginx.org/client-max-body-size: "0"
+            classes:
+              namespace: {{ $.Values.ingress.namespace }}
+              cluster: {{ $.Values.ingress.class }}
+{{- end }}
+    - labels:
+        nodeSelector: &openstackCommonNodeSelector
+          {{ $.Values.openstack.nodeSelectors.common | toYaml | nindent 10 }}
+        computeNodeSelector: &openstackComputeNodeSelector
+          <<: *openstackCommonNodeSelector
+        controlNodeSelector: &openstackControlNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronLbNodeSelector: &openstackNeutronLbNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronOvsNodeSelector: &openstackNeutronOvsNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronSriovNodeSelector: &openstackNeutronSriovNodeSelector
+          <<: *openstackCommonNodeSelector
+      issuers:
+        openstack: &openstackCAIssuer
+          issuerRef:
+            {{ .Values.openstack.tls.certIssuers.openstack | toYaml | nindent 12 }}
+
+releases:
+- name: keystone
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/keystone"
+  labels:
+    app: openstack
+  needs:
+  - kube-system/cert-manager
+  - {{ .Values.ingress.namespace }}/nginx
+  - {{ .Values.openstack.namespace }}/memcached
+  - {{ .Values.openstack.namespace }}/rabbitmq
+  - {{ .Values.openstack.namespace }}/patroni
+  - {{ .Values.openstack.namespace }}/mariadb
+  - {{ .Values.openstack.namespace }}/mysql
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+  - images:
+      tags:
+        keystone_api: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_credential_cleanup: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        keystone_db_sync: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_domain_manage: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_credential_rotate: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_credential_setup: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_fernet_rotate: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_fernet_setup: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=keystone-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+{{- if .Values.openstack.tls.enabled }}
+    endpoints:
+      identity:
+        hosts:
+          internal: keystone-api
+        scheme:
+          default: http
+        port:
+          api:
+            admin: 5000
+            internal: 5000
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: keystone-tls
+    secrets:
+      tls:
+        identity:
+          api:
+            public: keystone-tls
+            internal: keystone-tls
+{{- end }}
+
+- name: glance
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/glance"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/ceph-openstack-config
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - "{{ requiredEnv "MYDIR" }}/nginx-void.yaml"
+  - conf:
+      glance:
+        keystone_authtoken:
+          cafile: /etc/glance/certs/ca.crt
+        glance_store:
+          https_ca_certificates_file: /etc/glance/certs/ca.crt
+          swift_store_cacert: /etc/glance/certs/ca.crt
+      glance_registry:
+        keystone_authtoken:
+          cafile: /etc/glance/certs/ca.crt
+    endpoints:
+      image:
+        hosts:
+          default: glance-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9292
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: glance-api-tls
+      image_registry:
+        hosts:
+          default: glance-registry
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9191
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: glance-registry-tls
+    secrets:
+      rbd: pvc-ceph-client-key
+      tls:
+        image:
+          api:
+            public: glance-api-tls
+            internal: glance-api-tls
+        image_registry:
+          api:
+            public: glance-registry-tls
+            internal: glance-registry-tls
+    #network:
+    #  api:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "glance-api"
+    #  registry:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "glance-registry"
+{{- end }}
+  - storage: rbd
+    conf:
+      glance:
+        DEFAULT:
+          bind_host: 0.0.0.0
+        glance_store:
+          rbd_store_replication: 2
+          # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
+          rbd_store_crush_rule: {{ .Values.rook.replicaPool }}
+    images:
+      tags:
+        glance_api: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
+        glance_db_sync: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
+        glance_metadefs_load: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
+        glance_registry: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
+        glance_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      registry:
+        <<: *openstackControlNodeSelector
+    pod:
+      replicas:
+        api: 1
+        registry: 1
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=glance-api rewrite=/"
+            nginx.org/websocket-services: glance-api
+      registry:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=glance-registry rewrite=/"
+            #nginx.org/websocket-services: glance-registry
+    #manifests:
+    #  deployment_registry: true
+    #  ingress_registry: true
+    #  pdb_registry: true
+    #  service_ingress_registry: true
+    #  service_registry: true
+
+- name: cinder
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/cinder"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/ceph-openstack-config
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+  - storage: ceph
+    conf:
+      ceph:
+        pools:
+          backup:
+            replication: 1
+            # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
+            crush_rule: {{ .Values.rook.replicaPool }}
+          cinder.volumes:
+            replication: 2
+            # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
+            crush_rule: {{ .Values.rook.replicaPool }}
+      #cinder:
+      #  DEFAULT:
+      #    backup_driver: "cinder.backup.drivers.ceph.CephBackupDriver"
+      #    backup_ceph_conf: /etc/ceph/ceph.conf
+      #    backup_ceph_user: cinderbackup
+      #    backup_ceph_pool: cinder.backups
+    images:
+      tags:
+        cinder_api: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_db_sync: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+        cinder_scheduler: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_volume: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_volume_usage_audit: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_backup: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
+        cinder_backup_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      backup:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      scheduler:
+        <<: *openstackControlNodeSelector
+      volume:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=cinder-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+        volume: 1
+        scheduler: 1
+        backup: 1
+      security_context:
+        cinder_volume:
+          container:
+            cinder_volume:
+              capabilities:
+                add:
+                - CAP_AUDIT_WRITE
+    manifests:
+      network_policy: true
+    secrets:
+      rbd:
+        backup: pvc-ceph-client-key
+        volume: pvc-ceph-client-key
+        volume_external: pvc-ceph-client-key
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      cinder:
+        DEFAULT:
+          glance_ca_certificates_file: /etc/cinder/certs/ca.crt
+        keystone_authtoken:
+          cafile: /etc/cinder/certs/ca.crt
+      #software:
+      #  apache2:
+      #    binary: cinder-api
+      #    start_parameters: "--config-file /etc/cinder/cinder.conf"
+      #    a2enmod: null
+      #    a2dismod: null
+    secrets:
+      tls:
+        volume:
+          api:
+            public: cinder-v3-tls
+            internal: cinder-v3-tls
+    endpoints:
+      volume:
+        hosts:
+          default: cinder-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8776
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: cinder-v1-tls
+      volumev2:
+        hosts:
+          default: cinder-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8776
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: cinder-v2-tls
+      volumev3:
+        hosts:
+          default: cinder-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8776
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: cinder-v3-tls
+{{- end }}
+
+- name: heat
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/heat"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      heat:
+        clients_neutron:
+          ca_file: /etc/heat/certs/ca.crt
+        clients_cinder:
+          ca_file: /etc/heat/certs/ca.crt
+        clients_glance:
+          ca_file: /etc/heat/certs/ca.crt
+        clients_nova:
+          ca_file: /etc/heat/certs/ca.crt
+        clients_swift:
+          ca_file: /etc/heat/certs/ca.crt
+        ssl:
+          ca_file: /etc/heat/certs/ca.crt
+        keystone_authtoken:
+          cafile: /etc/heat/certs/ca.crt
+        clients:
+          ca_file: /etc/heat/certs/ca.crt
+        clients_keystone:
+          ca_file: /etc/heat/certs/ca.crt
+    endpoints:
+      orchestration:
+        hosts:
+          default: heat-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8004
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: heat-api-tls
+      cloudformation:
+        hosts:
+          default: heat-cfn
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8000
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: heat-cfn-tls
+      cloudwatch:
+        hosts:
+          default: heat-cloudwatch
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8003
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: heat-cloudwatch-tls
+    secrets:
+      tls:
+        orchestration:
+          api:
+            public: heat-api-tls
+            internal: heat-api-tls
+        cloudformation:
+          cfn:
+            public: heat-cfn-tls
+            internal: heat-cfn-tls
+{{- end }}
+  - images:
+      tags:
+        heat_api: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_cfn: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_cloudwatch: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_db_sync: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_engine: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_engine_cleaner: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_purge_deleted: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      cfn:
+        <<: *openstackControlNodeSelector
+      cloudwatch:
+        <<: *openstackControlNodeSelector
+      engine:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    pod:
+      replicas:
+        api: 1
+        cfn: 1
+        cloudwatch: 1
+        engine: 1
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=heat-api rewrite=/"
+      cfn:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=heat-cfn rewrite=/"
+      #cloudwatch:
+      #  ingress:
+      #    annotations:
+      #      nginx.org/rewrites: "serviceName=heat-api rewrite=/"
+
+- name: neutron
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/neutron"
+  #installed: false
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/openvswitch
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl apply -f- <<EOF
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: neutron-ovs-gateway-setup
+        namespace: {{ .Values.openstack.namespace }}
+      spec:
+        selector:
+          matchLabels:
+            app: neutron-ovs-gateway-setup
+        template:
+          metadata:
+            labels:
+              app: neutron-ovs-gateway-setup
+          spec:
+            hostNetwork: true
+            nodeSelector:
+              {{ $.Values.openstack.nodeSelectors.neutronOvs.node_selector_key | quote }}: {{ $.Values.openstack.nodeSelectors.neutronOvs.node_selector_value | quote }}
+            volumes:
+            - name: lib-modules
+              hostPath:
+                path: /lib/modules
+            - name: iptables-lockfile
+              hostPath:
+                path: /run/xtables.lock
+            - name: run-netns
+              hostPath:
+                path: /run/netns
+            containers:
+            - name: gateway-setup
+              image: "alpine:edge"
+              securityContext:
+                capabilities:
+                  add:
+                  - CAP_NET_ADMIN
+              volumeMounts:
+              - name: lib-modules
+                mountPath: /lib/modules
+                readOnly: true
+              - name: iptables-lockfile
+                mountPath: /run/xtables.lock
+              command:
+              - "/bin/sh"
+              - "-xec"
+              - |
+                apk add --no-cache iptables
+                ip addr change {{ $.Values.openstack.neutron.extBridge.addr }} dev {{ $.Values.openstack.neutron.extBridge.name }}
+                ip link set {{ $.Values.openstack.neutron.extBridge.name }} up
+                iptables -t nat -C POSTROUTING -s {{ $.Values.openstack.neutron.extBridge.cidr }} -o {{ $.Values.openstack.neutron.extBridge.iface }} -j MASQUERADE || iptables -t nat -A POSTROUTING -s {{ $.Values.openstack.neutron.extBridge.cidr }} -o {{ $.Values.openstack.neutron.extBridge.iface }} -j MASQUERADE
+      EOF
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  #- "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/neutron/values_overrides/tls.yaml"
+  - "{{ requiredEnv "MYDIR" }}/nginx-void.yaml"
+  - conf:
+      neutron:
+        DEFAULT:
+          bind_host: 0.0.0.0
+        nova:
+          cafile: /etc/neutron/certs/ca.crt
+        keystone_authtoken:
+          cafile: /etc/neutron/certs/ca.crt
+      metadata_agent:
+        DEFAULT:
+          auth_ca_cert: /etc/ssl/certs/openstack-helm.crt
+          nova_metadata_port: 443
+          nova_metadata_protocol: https
+    endpoints:
+      network:
+        hosts:
+          default: neutron-server
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9696
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: neutron-tls
+    #network:
+    #  server:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "neutron-server"
+    secrets:
+      tls:
+        compute_metadata:
+          metadata:
+            internal: nova-metadata-tls
+        network:
+          server:
+            public: neutron-tls
+            internal: neutron-tls
+{{- end }}
+  - images:
+      tags:
+        neutron_db_sync: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_server: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_dhcp: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_metadata: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_l3: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_l2gw: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_openvswitch_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_linuxbridge_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_bagpipe_bgp: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_ironic_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_netns_cleanup_cron: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+    labels:
+      agent:
+        dhcp:
+          <<: *openstackControlNodeSelector
+        l3:
+          <<: *openstackControlNodeSelector
+        metadata:
+          <<: *openstackControlNodeSelector
+        l2gw:
+          <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      server:
+        <<: *openstackControlNodeSelector
+      ironic_agent:
+        <<: *openstackControlNodeSelector
+      netns_cleanup_cron:
+        <<: *openstackControlNodeSelector
+      lb:  # linuxbridge
+        <<: *openstackNeutronLbNodeSelector
+      ovs:  # openvswitch
+        <<: *openstackNeutronOvsNodeSelector
+      #sriov:  # sriov
+      #  <<: *openstackNeutronSriovNodeSelector
+      bagpipe_bgp:
+        <<: *openstackComputeNodeSelector
+    network:
+      interface:
+        tunnel: {{ $.Values.openstack.neutron.extBridge.iface }}
+      server:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=neutron-server rewrite=/"
+            nginx.org/websocket-services: neutron-server
+    conf:
+      neutron:
+        DEFAULT:
+          l3_ha: False
+          max_l3_agents_per_router: 1
+          l3_ha_network_type: vxlan
+          dhcp_agents_per_network: 1
+      plugins:
+        ml2_conf:
+          ml2_type_flat:
+            flat_networks: {{ $.Values.openstack.neutron.extBridge.network }}
+        openvswitch_agent:
+          agent:
+            tunnel_types: vxlan
+          ovs:
+            bridge_mappings: "{{ $.Values.openstack.neutron.extBridge.network }}:{{ $.Values.openstack.neutron.extBridge.name }}"
+      rabbitmq:
+        policies:
+        - vhost: "neutron"
+          name: "ha_ttl_neutron"
+          definition:
+            ha-mode: "all"
+            ha-sync-mode: "automatic"
+            message-ttl: 120000
+          priority: 0
+          apply-to: all
+          # only pattern changed
+          pattern: '^(?!amq\.).*'
+    resources:
+      enabled: true
+    pod:
+      probes:
+        rpc_timeout: 300
+      replicas:
+        server: 1
+        ironic_agent: 1
+      use_fqdn:
+        neutron_agent: false
+    manifests:
+      daemonset_sriov_agent: false
+
+- name: nova
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/nova"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/ceph-openstack-config
+  - {{ .Values.openstack.namespace }}/keystone
+  #- {{ .Values.openstack.namespace }}/libvirt
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  #- "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/nova/values_overrides/tls.yaml"
+  - conf:
+      nova:
+        glance:
+          cafile: /etc/nova/certs/ca.crt
+        ironic:
+          cafile: /etc/nova/certs/ca.crt
+        neutron:
+          cafile: /etc/nova/certs/ca.crt
+        keystone_authtoken:
+          cafile: /etc/nova/certs/ca.crt
+        cinder:
+          cafile: /etc/nova/certs/ca.crt
+        placement:
+          cafile: /etc/nova/certs/ca.crt
+        keystone:
+          cafile: /etc/nova/certs/ca.crt
+    endpoints:
+      compute:
+        hosts:
+          default: nova-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8774
+          novncproxy:
+            default: 6080
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: nova-api-tls
+      compute_metadata:
+        hosts:
+          default: nova-metadata
+        scheme:
+          default: http
+        port:
+          metadata:
+            default: 8775
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: nova-metadata-tls
+      compute_novnc_proxy:
+        hosts:
+          default: nova-novncproxy
+        scheme:
+          default: http
+        port:
+          novnc_proxy:
+            default: 6080
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: nova-novncproxy-tls
+      compute_spice_proxy:  # just to pad out certificate creation?
+        hosts:
+          default: nova-spiceproxy
+        scheme:
+          default: http
+        port:
+          spice_proxy:
+            default: 6082
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: nova-spiceproxy-tls
+      #placement:
+      #  hosts:
+      #    default: placement-api
+      #  scheme:
+      #    default: http
+      #  port:
+      #    spice_proxy:
+      #      default: 8778
+      #  host_fqdn_override:
+      #    default:
+      #      tls:
+      #        <<: *openstackCAIssuer
+      #        secretName: nova-placement-tls
+    secrets:
+      tls:
+        compute:
+          osapi:
+            public: nova-api-tls
+            internal: nova-api-tls
+        compute_metadata:
+          metadata:
+            public: nova-metadata-tls
+            internal: nova-metadata-tls
+        compute_novnc_proxy:
+          novncproxy:
+            public: nova-novncproxy-tls
+            internal: nova-novncproxy-tls
+        compute_spice_proxy:
+          spiceproxy:
+            public: nova-spiceproxy-tls
+            internal: nova-spiceproxy-tls
+        #placement:
+        #  placement:
+        #    public: nova-placement-tls
+        #    internal: nova-placement-tls
+    #network:
+    #  osapi:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-api"
+    #  metadata:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-metadata"
+    #  novncproxy:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "nova-novncproxy"
+    #  placement:
+    #    ingress:
+    #      annotations:
+    #        nginx.org/ssl-services: "placement-api"
+{{- end }}
+  - images:
+      tags:
+        nova_api: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_cell_setup: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_cell_setup_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        nova_compute: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_compute_ironic: docker.io/kolla/ubuntu-source-nova-compute-ironic:{{ .Values.openstack.version }}
+        nova_compute_ssh: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_conductor: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_consoleauth: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_db_sync: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_novncproxy: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ .Values.openstack.version }}
+        nova_placement: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_scheduler: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_service_cleaner: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+        nova_spiceproxy: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_spiceproxy_assets: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+    labels:
+      agent:
+        compute:
+          <<: *openstackComputeNodeSelector
+        compute_ironic:
+          <<: *openstackComputeNodeSelector
+      api_metadata:
+        <<: *openstackControlNodeSelector
+      conductor:
+        <<: *openstackControlNodeSelector
+      consoleauth:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      novncproxy:
+        <<: *openstackControlNodeSelector
+      osapi:
+        <<: *openstackControlNodeSelector
+      placement:
+        <<: *openstackControlNodeSelector
+      scheduler:
+        <<: *openstackControlNodeSelector
+      spiceproxy:
+        <<: *openstackControlNodeSelector
+    network:
+      osapi:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-api rewrite=/"
+      metadata:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-metadata rewrite=/"
+      novncproxy:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-novncproxy rewrite=/"
+            nginx.org/websocket-services: nova-novncproxy
+      #placement:
+      #  ingress:
+      #    annotations:
+      #      nginx.org/rewrites: "serviceName=placement-api rewrite=/"
+    endpoints:
+      oslo_db_api:
+        auth:
+          admin:
+            username: {{ $.Values.credentials.database.root.user | quote }}
+            password: {{ $.Values.credentials.database.root.pass | quote }}
+          nova:
+            username: {{ $.Values.credentials.database.nova.user | quote }}
+            password: {{ $.Values.credentials.database.nova.pass | quote }}
+        hosts:
+          default: {{ $.Values.credentials.database.root.host | quote }}
+        scheme: {{ $.Values.credentials.database.root.scheme | quote }}
+        port:
+          mysql:
+            default: {{ $.Values.credentials.database.root.port }}
+      oslo_db_cell0:
+        auth:
+          admin:
+            username: {{ $.Values.credentials.database.root.user | quote }}
+            password: {{ $.Values.credentials.database.root.pass | quote }}
+          nova:
+            username: {{ $.Values.credentials.database.nova.user | quote }}
+            password: {{ $.Values.credentials.database.nova.pass | quote }}
+        hosts:
+          default: {{ $.Values.credentials.database.root.host | quote }}
+        scheme: {{ $.Values.credentials.database.root.scheme | quote }}
+        port:
+          mysql:
+            default: {{ $.Values.credentials.database.root.port }}
+    manifests:
+      deployment_consoleauth: false
+      deployment_placement: false
+      ingress_placement: false
+      job_db_init_placement: false
+      job_ks_placement_endpoints: false
+      job_ks_placement_service: false
+      job_ks_placement_user: false
+      pdb_placement: false
+      secret_keystone_placement: false
+      service_ingress_placement: false
+      service_placement: false
+    conf:
+      ceph:
+        cinder:
+          user: admin
+      rabbitmq:
+        policies:
+        - vhost: "nova"
+          name: "ha_ttl_nova"
+          definition:
+            ha-mode: "all"
+            ha-sync-mode: "automatic"
+            message-ttl: 120000
+          priority: 0
+          apply-to: all
+          # only pattern changed
+          pattern: '^(?!amq\.).*'
+      nova:
+        api_database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          connection_debug: 100
+        database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          #min_pool_size: 0
+          connection_debug: 100
+          #use_db_reconnect: "True"
+          #use_tpool: "True"
+        cell0_database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          connection_debug: 100
+    resources:
+      enabled: true
+    pod:
+      probes:
+        rpc_timeout: 300
+      replicas:
+        api_metadata: 1
+        osapi: 1
+        conductor: 1
+        scheduler: 1
+        novncproxy: 1
+      use_fqdn:
+        compute: false
+    bootstrap:
+      structured:
+        flavors:
+          options:
+{{- range list "m1_tiny" "m1_small" "m1_medium" "m1_large" "m1_xlarge" }}
+            {{ . }}:
+              id: {{ . }}
+{{- end }}
+
+- name: placement
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/placement"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  #- {{ .Values.openstack.namespace }}/nova
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      placement:
+        keystone_authtoken:
+          cafile: /etc/placement/certs/ca.crt
+    endpoints:
+      placement:
+        hosts:
+          default: placement-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8778
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: placement-tls
+    secrets:
+      tls:
+        placement:
+          api:
+            public: placement-tls
+            internal: placement-tls
+{{- end }}
+  - images:
+      tags:
+        db_migrate: quay.io/airshipit/porthole-postgresql-utility:latest-{{ .Values.openstack.baseImage }}
+        placement: {{ .Values.registry }}/openstack/placement:{{ $osTag }}
+        placement_db_sync: {{ .Values.registry }}/openstack/placement:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=placement-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+
+- name: barbican
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/barbican"
+  #installed: false  # add tls support in job-ks-service.yaml
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  #- {{ .Values.openstack.namespace }}/neutron
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      barbican:
+        keystone_authtoken:
+          cafile: /etc/barbican/certs/ca.crt
+    endpoints:
+      key_manager:
+        hosts:
+          default: barbican-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9311
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: barbican-tls
+    secrets:
+      tls:
+        key_manager:
+          api:
+            public: barbican-tls
+{{- end }}
+  - images:
+      tags:
+        barbican_db_sync: {{ .Values.registry }}/openstack/barbican:{{ $osTag }}
+        barbican_api: {{ .Values.registry }}/openstack/barbican:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=barbican-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+
+- name: octavia
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/octavia"
+  #installed: false  # add tls support in job-ks-service.yaml
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  - {{ .Values.openstack.namespace }}/neutron
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      octavia:
+        keystone_authtoken:
+          cafile: /etc/octavia/certs/ca.crt
+    endpoints:
+      load_balancer:
+        hosts:
+          default: octavia-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9876
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: octavia-tls
+    secrets:
+      tls:
+        load_balancer:
+          api:
+            public: octavia-tls
+{{- end }}
+  - images:
+      tags:
+        octavia_db_sync: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_api: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_worker: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_housekeeping: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_health_manager: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_health_manager_init: docker.io/kolla/ubuntu-source-octavia-health-manager:{{ .Values.openstack.version }}
+        openvswitch_vswitchd: docker.io/kolla/centos-source-openvswitch-vswitchd:{{ .Values.openstack.version }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      health_manager:
+        <<: *openstackControlNodeSelector
+      housekeeping:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      worker:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=octavia-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+        worker: 1
+        housekeeping: 1
+    manifests:
+      daemonset_health_manager: false
+
+- name: designate
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/designate"
+  #installed: false  # add tls support in job-ks-service.yaml
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/powerdns
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - conf:
+      designate:
+        keystone_authtoken:
+          cafile: /etc/designate/certs/ca.crt
+    endpoints:
+      dns:
+        hosts:
+          default: designate-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 9001
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: designate-tls
+    secrets:
+      tls:
+        dns:
+          api:
+            public: designate-tls
+{{- end }}
+  - images:
+      tags:
+        designate_api: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_central: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_db_sync: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_mdns: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_producer: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_sink: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_worker: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      central:
+        <<: *openstackControlNodeSelector
+      producer:
+        <<: *openstackControlNodeSelector
+      worker:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      mdns:
+        <<: *openstackControlNodeSelector
+      sink:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=designate-api rewrite=/"
+    pod:
+      replicas:
+        api: 1
+        central: 1
+        mdns: 1
+        producer: 1
+        sink: 1
+        worker: 1
+
+- name: magnum
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/magnum"
+  installed: false
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+{{- end }}
+  - images:
+      tags:
+        magnum_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        magnum_conductor: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        magnum_db_sync: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      conductor:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+
+- name: senlin
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/senlin"
+  installed: false
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+{{- end }}
+  - images:
+      tags:
+        senlin_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        senlin_db_sync: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        senlin_engine: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        senlin_engine_cleaner: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      engine:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      dashboard:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=senlin-api rewrite=/"
+
+# would love to do manila and trove helm charts some day
+
+- name: horizon
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/horizon"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+  - endpoints:
+      dashboard:
+        hosts:
+          default: horizon-int
+        scheme:
+          default: http
+        port:
+          web:
+            default: 80
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: horizon-tls
+    secrets:
+      tls:
+        dashboard:
+          dashboard:
+            public: horizon-tls
+            internal: horizon-tls
+{{- end }}
+  - images:
+      tags:
+        horizon_db_sync: {{ .Values.registry }}/openstack/horizon:{{ $osTag }}
+        horizon: {{ .Values.registry }}/openstack/horizon:{{ $osTag }}
+    labels:
+      dashboard:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      dashboard:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=horizon-int rewrite=/"
+    pod:
+      replicas:
+        server: 1

@@ -1,0 +1,392 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+helmDefaults:
+  wait: true
+  timeout: {{ .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+repositories:
+- name: rook
+  url: "https://charts.rook.io/release"
+
+releases:
+# https://rook.io/docs/rook/master/helm-operator.html
+- name: rook-operator
+  namespace: {{ .Values.rook.namespace }}
+  chart: rook/rook-ceph
+  version: {{ .Values.versions.charts.rook }}
+  labels:
+    app: ceph
+    purpose: dependency
+{{- if not .Values.rook.hostBasedOSDs }}
+  needs:
+  - openebs/openebs
+{{- end }}
+  values:
+  - csi:
+      provisionerTolerations:
+      - key: "node-role.kubernetes.io/master"
+        operator: Exists
+        value: ""
+        #effect: "NoSchedule,PreferNoSchedule,NoExecute"
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - "until kubectl -n kube-system wait --for condition=available deploy/coredns; do sleep 1; done 2>/dev/null"
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl get ns {{ .Values.rook.namespace }} || kubectl create ns {{ .Values.rook.namespace }}
+      until kubectl wait --for condition=established crd/cephclusters.ceph.rook.io; do sleep 1; done 2>/dev/null ||:
+      kubectl apply -f- <<EOF
+      kind: ConfigMap
+      apiVersion: v1
+      metadata:
+        name: rook-config-override
+        namespace: {{ .Values.rook.namespace }}
+      data:
+        config: |
+          [global]
+          osd_pool_default_size = 1
+      ---
+      # https://rook.io/docs/rook/master/ceph-cluster-crd.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephCluster
+      metadata:
+        name: {{ .Values.rook.cluster }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        dataDirHostPath: /var/lib/rook
+        cephVersion:
+          image: ceph/ceph:v{{ default "16.2.4" (env "CEPH_VERSION") }}
+          allowUnsupported: true
+        mon:
+          count: {{ default 3 (env "CEPH_MON_COUNT") }}
+          allowMultiplePerNode: true
+        mgr:
+          modules:
+          - name: pg_autoscaler
+            enabled: true
+        dashboard:
+          enabled: true
+        crashCollector:
+          disable: true
+{{- if .Values.rook.cephfs.enabled }}
+        network:  # ref: https://github.com/rook/rook/issues/4006#issuecomment-602044153
+          hostNetwork: true
+{{- end }}
+        storage:
+{{- if .Values.rook.hostBasedOSDs }}
+          useAllDevices: true
+          useAllNodes: true
+          #devicePathFilter: '^/dev/disk/by-id/scsi-.*QEMU_HARDDISK.*'
+          #nodes:
+          #- name: {{ env "FIRST_WORKER" | quote }}
+          #  devicePathFilter: '^/dev/disk/by-path/virtio-pci-.*'
+{{- else }}
+          ## PVC-based
+          storageClassDeviceSets:
+          - name: set1
+            count: {{ int (default "6" (env "NUM_VOLUMES")) }}
+            placement:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: 'node-role.kubernetes.io/master'
+                      operator: DoesNotExist
+            volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                volumeMode: Block
+                storageClassName: {{ .Values.backingStorageClass }}
+                resources:
+                  requests:
+                    storage: {{ trimSuffix "B" (default "10GiB" (env "VOLUME_SIZE")) }}
+{{- end }}
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ceph-mon
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        clusterIP: None
+        selector:
+          mon_cluster: {{ .Values.rook.namespace }}
+          rook_cluster: {{ .Values.rook.namespace }}
+          ceph_daemon_type: mon
+        ports:
+        - name: tcp-msgr1
+          port: 6789
+          protocol: TCP
+          targetPort: 6789
+        - name: tcp-msgr2
+          port: 3300
+          protocol: TCP
+          targetPort: 3300
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rook-ceph-tools
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: rook-ceph-tools
+        template:
+          metadata:
+            labels:
+              app: rook-ceph-tools
+          spec:
+            dnsPolicy: ClusterFirstWithHostNet
+            containers:
+            - name: rook-ceph-tools
+              image: rook/ceph:master
+              command: ["/tini"]
+              args: ["-g", "--", "/usr/local/bin/toolbox.sh"]
+              imagePullPolicy: IfNotPresent
+              env:
+              - name: ROOK_CEPH_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: rook-ceph-mon
+                    key: ceph-username
+              - name: ROOK_CEPH_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: rook-ceph-mon
+                    key: ceph-secret
+              securityContext:
+                privileged: true
+              volumeMounts:
+              - name: ceph-config
+                mountPath: /etc/ceph
+              - name: mon-endpoint-volume
+                mountPath: /etc/rook
+              - name: dev
+                mountPath: /dev
+              - name: sysbus
+                mountPath: /sys/bus
+              - name: libmodules
+                mountPath: /lib/modules
+            #hostNetwork: true
+            volumes:
+            - name: mon-endpoint-volume
+              configMap:
+                name: rook-ceph-mon-endpoints
+                items:
+                - key: data
+                  path: mon-endpoints
+            - name: ceph-config
+              emptyDir: {}
+            - name: dev
+              hostPath:
+                path: /dev
+            - name: sysbus
+              hostPath:
+                path: /sys/bus
+            - name: libmodules
+              hostPath:
+                path: /lib/modules
+            tolerations:
+            - key: "node.kubernetes.io/unreachable"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 5
+      EOF
+      #until kubectl -n {{ .Values.rook.namespace }} wait --for condition=ready cephcluster {{ .Values.rook.cluster }}; do sleep 1; done 2>/dev/null
+      kubectl apply -f- <<EOF
+{{- if .Values.rook.rbd.enabled }}
+      # https://rook.io/docs/rook/master/ceph-pool-crd.html
+      # https://rook.github.io/docs/rook/master/ceph-block.html
+      # https://rook.github.io/docs/rook/master/direct-tools.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephBlockPool
+      metadata:
+        name: {{ .Values.rook.replicaPool }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        failureDomain: osd
+        replicated:
+          size: 2
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephBlockPool
+      metadata:
+        name: ecpool
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        failureDomain: osd
+        erasureCoded:
+          dataChunks: 2
+          codingChunks: 1
+        #deviceClass: hdd
+      ---
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: rook-ceph-block
+      provisioner: {{ .Values.rook.namespace }}.rbd.csi.ceph.com
+      reclaimPolicy: Delete
+      parameters:
+        # clusterID is the namespace where the rook cluster is running
+        clusterID: {{ .Values.rook.namespace }}
+        # If you want to use erasure coded pool with RBD, you need to create
+        # two pools. one erasure coded and one replicated.
+        # You need to specify the replicated pool here in the "pool" parameter, it is
+        # used for the metadata of the images.
+        # The erasure coded pool must be set as the "dataPool" parameter below.
+        dataPool: ecpool
+        pool: {{ .Values.rook.replicaPool }}
+
+        # RBD image format. Defaults to "2".
+        imageFormat: "2"
+
+        # RBD image features. Available for imageFormat: "2". CSI RBD currently supports only "layering" feature.
+        imageFeatures: layering
+
+        # The secrets contain Ceph admin credentials. These are generated automatically by the operator
+        # in the same namespace as the cluster.
+        csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+        csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+        csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+        csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.rook.namespace }}
+
+        # Specify the filesystem type of the volume. If not specified, csi-provisioner
+        # will set default as "ext4".
+        csi.storage.k8s.io/fstype: ext4
+{{- end }}
+{{- if .Values.rook.object.enabled }}
+      ---
+      # https://rook.io/docs/rook/master/ceph-object-store-crd.html
+      # https://rook.github.io/docs/rook/master/ceph-object.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectStore
+      metadata:
+        name: {{ .Values.rook.object.store.name }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        metadataPool:
+          failureDomain: osd
+          replicated:
+            size: 2
+        dataPool:
+          failureDomain: osd
+          erasureCoded:
+            dataChunks: 2
+            codingChunks: 1
+        preservePoolsOnDelete: true
+        gateway:
+          type: s3
+          port: 8088
+          #securePort: 8443
+          instances: 2
+      ---
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: {{ .Values.rook.object.store.storageClass }}
+      provisioner: {{ .Values.rook.namespace }}.ceph.rook.io/bucket
+      reclaimPolicy: Delete
+      parameters:
+        objectStoreName: {{ .Values.rook.object.store.name }}
+        objectStoreNamespace: {{ .Values.rook.namespace }}
+        region: us-east-1
+      ---
+      apiVersion: objectbucket.io/v1alpha1
+      kind: ObjectBucketClaim
+      metadata:
+        name: ceph-bucket
+      spec:
+        generateBucketName: ceph-bkt
+        storageClassName: {{ .Values.rook.object.store.storageClass }}
+{{- end }}
+{{- if .Values.rook.cephfs.enabled }}
+      ---
+      # https://rook.io/docs/rook/master/ceph-filesystem-crd.html
+      # https://rook.github.io/docs/rook/master/ceph-filesystem.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephFilesystem
+      metadata:
+        name: {{ .Values.rook.cephfs.name }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        metadataPool:
+          failureDomain: osd
+          replicated:
+            size: 2
+        dataPools:
+        - failureDomain: osd
+          erasureCoded:
+            dataChunks: 2
+            codingChunks: 1
+        preservePoolsOnDelete: true
+        metadataServer:
+          activeCount: 1
+          activeStandby: true
+  {{- if .Values.rook.cephfs.nfs }}
+      ---
+      # https://rook.io/docs/rook/master/ceph-nfs-crd.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephNFS
+      metadata:
+        name: my-nfs
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        rados:
+          # RADOS pool where NFS client recovery data is stored.
+          pool: {{ .Values.rook.cephfs.name }}-data0
+          # RADOS namespace where NFS client recovery data is stored in the pool.
+          namespace: nfs-ns
+        # Settings for the NFS server
+        server:
+          active: 1
+  {{- end }}
+      ---
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: rook-cephfs
+      # Change "rook-ceph" provisioner prefix to match the operator namespace if needed
+      provisioner: {{ .Values.rook.namespace }}.cephfs.csi.ceph.com
+      reclaimPolicy: Delete
+      parameters:
+        # clusterID is the namespace where operator is deployed.
+        clusterID: {{ .Values.rook.namespace }}
+
+        # CephFS filesystem name into which the volume shall be created
+        fsName: {{ .Values.rook.cephfs.name }}
+
+        # Ceph pool into which the volume shall be created
+        # Required for provisionVolume: "true"
+        pool: {{ .Values.rook.cephfs.name }}-data0
+
+        # Root path of an existing CephFS volume
+        # Required for provisionVolume: "false"
+        # rootPath: /absolute/path
+
+        # The secrets contain Ceph admin credentials. These are generated automatically by the operator
+        # in the same namespace as the cluster.
+        csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+        csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+        csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+        csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.rook.namespace }}
+{{- end }}
+      EOF

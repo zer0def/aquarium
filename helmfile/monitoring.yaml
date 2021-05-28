@@ -1,0 +1,290 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+repositories:
+- name: banzaicloud  # thanos, src: https://github.com/banzaicloud/banzai-charts
+  url: "https://kubernetes-charts.banzaicloud.com"
+# - https://github.com/timescale/promscale/tree/master/helm-chart
+# - https://github.com/timescale/timescaledb-kubernetes
+# - https://github.com/timescale/tobs
+- name: timescale
+  url: "https://charts.timescale.com"
+- name: cortex
+  url: "https://cortexproject.github.io/cortex-helm-chart"
+
+templates:
+  cortex:
+    values:
+    - &etcdKvStore
+      store: etcd
+      etcd:
+        tls_enabled: false
+        tls_insecure_skip_verify: false
+        endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
+    - &cortexS3
+      endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+      access_key_id: {{ .Values.minio.accessKey | quote }}
+      secret_access_key: {{ .Values.minio.secretKey | quote }}
+      insecure: true
+      signature_version: v2
+    - &cortexBlockKvStore
+      kvstore:
+        <<: *etcdKvStore
+        prefix: "cortex/collectors/"
+
+releases:
+- name: {{ .Values.releases.thanos }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: banzaicloud/thanos
+  installed: {{ and .Values.enables.monitoring .Values.enables.minio (not .Values.enables.cortex) }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  values:
+  - fullnameOverride: {{ .Values.releases.thanos | quote }}
+    objstoreSecretOverride: {{ .Values.thanosObjstoreConfig.secret | quote }}
+    image:
+      tag: 'v{{ .Values.versions.images.thanos }}'
+    compact:
+      retentionResolutionRaw: 3d
+      retentionResolution5m: 16d
+      retentionResolution1h: 28d
+    objstore:
+      type: S3
+      config:
+        bucket: {{ .Values.minio.defaultBucket | quote }}
+        endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+        access_key: {{ .Values.minio.accessKey | quote }}
+        secret_key: {{ .Values.minio.secretKey | quote }}
+        insecure: true
+        signature_version2: true
+    query:
+      replicaLabels:
+      - prometheus_replica  # server-scoped
+      #- prometheus  # cluster-scoped
+
+- name: {{ .Values.releases.cortex }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: cortex/cortex
+  installed: {{ and .Values.enables.monitoring .Values.enables.minio .Values.enables.cortex }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+{{- if .Values.enables.cortex }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl get ns {{ .Values.namespaces.monitoring }} || kubectl create ns {{ .Values.namespaces.monitoring }}
+      kubectl -n {{ $.Values.namespaces.storage }} exec $(kubectl -n {{ $.Values.namespaces.storage }} get pods -o jsonpath='{.items[?(@.metadata.labels.app=="minio-client")].metadata.name}' | awk '{print $1}') -- /bin/sh -xc 'mc ls {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.blocks }} || mc mb {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.blocks }}'
+      kubectl -n {{ $.Values.namespaces.storage }} exec $(kubectl -n {{ $.Values.namespaces.storage }} get pods -o jsonpath='{.items[?(@.metadata.labels.app=="minio-client")].metadata.name}' | awk '{print $1}') -- /bin/sh -xc 'mc ls {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.notify }} || mc mb {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.notify }}'
+      kubectl -n {{ .Values.namespaces.monitoring }} apply -f- <<EOF
+      kind: ConfigMap
+      apiVersion: v1
+      metadata:
+        name: {{ .Values.cortex.fallbackConfig.configMap }}
+      data:
+        {{ .Values.cortex.fallbackConfig.subPath }}: |
+          receivers:
+          - name: blackhole
+          route:
+            receiver: blackhole
+      EOF
+{{- end }}
+  values:
+  - images:
+      tag: v{{ .Values.versions.images.cortex }}
+    tags:
+      blocks-storage-memcached: true
+    alertmanager:
+      extraVolumes:
+      - name: alertmanager-fallback
+        configMap:
+          name: {{ .Values.cortex.fallbackConfig.configMap }}
+          optional: false
+      extraVolumeMounts:
+      - mountPath: {{ .Values.cortex.fallbackConfig.mountPath }}
+        name: alertmanager-fallback
+        readOnly: true
+    config:  # ref: https://github.com/cortexproject/cortex/blob/master/docs/configuration/config-file-reference.md
+      storage:
+        engine: blocks
+      blocks_storage:
+        tsdb:
+          dir: /data/tsdb
+        backend: s3
+        s3:
+          <<: *cortexS3
+          bucket_name: {{ .Values.cortex.buckets.blocks | quote }}
+      store_gateway:
+        sharding_enabled: true
+        sharding_ring:
+          <<: *cortexBlockKvStore
+      distributor:
+        ha_tracker:
+          kvstore:
+            store: etcd
+        ring:
+          <<: *cortexBlockKvStore
+      ingester:
+        lifecycler:
+          ring:
+            <<: *cortexBlockKvStore
+      compactor:
+        sharding_ring:
+          <<: *cortexBlockKvStore
+      ruler:
+        enable_api: true
+        enable_sharding: true
+        enable_alertmanager_v2: true
+        ring:
+          kvstore:
+            <<: *etcdKvStore
+            prefix: "cortex/rulers/"
+      alertmanager:
+        enable_api: true
+        sharding_enabled: true
+        fallback_config_file: {{ .Values.cortex.fallbackConfig.mountPath }}/{{ .Values.cortex.fallbackConfig.subPath }}
+        sharding_ring:
+          kvstore:
+            <<: *etcdKvStore
+            prefix: "cortex/alertmanagers/"
+{{- range (list "alertmanager" "ruler") }}
+      {{ . }}_storage:
+        backend: s3
+        s3:
+          <<: *cortexS3
+          bucket_name: {{ $.Values.cortex.buckets.notify | quote }}
+{{- end }}
+  -
+{{- range (list "alertmanager" "nginx" "distributor" "ingester" "ruler" "querier" "query_frontend" "table_manager" "configs" "store_gateway" "compactor") }}
+    {{ . }}:
+      replicas: 3
+      statefulSet:
+        enabled: true
+      #serviceMonitor:
+      #  enabled: true
+{{- end }}
+
+# requires non-free timescale-licensed addon to timescaledb.so
+- name: {{ .Values.releases.promscale }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: timescale/promscale
+  installed: {{ and .Values.enables.storage .Values.enables.monitoring }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  values:
+  - connection:
+      password:
+        timescaleDBSuperUserKey: password-superuser
+        secretTemplate: {{ .Values.releases.patroni | quote }}
+      host:
+        nameTemplate: '{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc'
+    service:
+      loadBalancer:
+        enabled: false
+
+- name: {{ .Values.releases.kubePromStack }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: prometheus-community/kube-prometheus-stack
+  version: {{ .Values.kubePromStackChartVersion }}
+  installed: {{ .Values.enables.monitoring }}
+  needs:
+  - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.cortex }}
+  - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.thanos }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.promscale }}
+  values:
+  - fullnameOverride: {{ .Values.releases.kubePromStack | quote }}
+    prometheus:
+      prometheusSpec:
+        podMetadata:
+          labels:
+            prometheus: self
+        #serviceMonitorNamespaceSelector: {}
+        serviceMonitorSelector:
+          matchLabels: {}  # match *ALL* ServiceMonitors on an *empty* set of labels
+        #podMonitorNamespaceSelector: {}
+        podMonitorSelector:
+          matchLabels: {}  # match *ALL* PodMonitors on an *empty* set of labels
+        logLevel: debug
+        retention: 3h
+{{- if .Values.enables.promscale }}
+        remoteRead:
+        - url: "http://promscale-connector.{{ .Values.namespaces.storage }}.svc:9201/read"
+          readRecent: true
+{{- end }}
+{{- if or .Values.enables.cortex .Values.enables.promscale }}
+        remoteWrite:
+{{- if .Values.enables.promscale }}
+        - url: "http://promscale-connector.{{ .Values.namespaces.storage }}.svc:9201/write"
+{{- end }}
+{{- if .Values.enables.cortex }}
+        - url: "http://cortex-distributor.{{ .Values.namespaces.monitoring }}.svc:8080/api/v1/push"
+{{- end }}
+{{- end }}
+        secrets:  # mounted under /etc/prometheus/secrets/<secret_name>/<key>
+        - {{ .Values.thanosSidecarMTLSSecret }}
+        thanos:  # https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#thanosspec
+          version: v{{ .Values.versions.images.thanos }}
+          objectStorageConfig:
+            key: {{ .Values.thanosObjstoreConfig.filename }}
+            name: {{ .Values.thanosObjstoreConfig.secret }}
+        #  grpcServerTlsConfig:
+        #    caFile: /etc/prometheus/secrets/{{ .Values.thanosSidecarMTLSSecret }}/ca.crt
+        #    certFile: /etc/prometheus/secrets/{{ .Values.thanosSidecarMTLSSecret }}/tls.crt
+        #    keyFile: /etc/prometheus/secrets/{{ .Values.thanosSidecarMTLSSecret }}/tls.key
+        #containers:  # https://github.com/prometheus-operator/prometheus-operator/issues/3322#issuecomment-655369312
+        #- name: thanos-sidecar
+        #  volumeMounts:
+        #  - mountPath: /etc/prometheus/secrets/{{ .Values.thanosSidecarMTLSSecret }}
+        #    readOnly: true
+        #    name: secret-{{ .Values.thanosSidecarMTLSSecret }}
+    grafana:
+      image:
+        repository: docker.io/grafana/grafana
+        tag: {{ .Values.versions.images.grafana }}
+      sidecar:
+        datasources:
+          defaultDatasourceEnabled: false
+      #plugins:
+      #- camptocamp-prometheus-alertmanager-datasource
+      grafana.ini:
+        panels:
+          enable_alpha: true
+      additionalDataSources:
+      - type: prometheus
+        access: proxy
+        isDefault: true
+{{- if not .Values.enables.cortex }}
+        name: Thanos
+        url: "http://thanos-query-http.{{ .Values.namespaces.monitoring }}.svc:10902/"
+{{- else }}
+        name: Cortex
+        url: "http://cortex-query-frontend.{{ .Values.namespaces.monitoring }}.svc:8080/prometheus"
+      #- type: camptocamp-prometheus-alertmanager-datasource
+      #  access: proxy
+      #  name: Cortex-CampToCamp
+      #  url: "http://cortex-alertmanager.{{ .Values.namespaces.monitoring }}.svc:8080/api/v1/alerts"
+      ## broken
+      - type: alertmanager
+        access: proxy
+        name: Cortex-Alertmanager
+        url: "http://cortex-alertmanager.{{ .Values.namespaces.monitoring }}.svc:8080/alertmanager"
+{{- end }}
+
+# doc: (use autoscaling/v2beta[12] HorizontalPodAutoscaler)
+# - ref: https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/config.md
+# - tut: https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/config-walkthrough.md
+- name: {{ .Values.releases.prometheusAdapter }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: prometheus-community/prometheus-adapter
+  installed: {{ .Values.enables.monitoring }}
+  needs:
+  - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
+  values:
+  - image:
+      repository: directxman12/k8s-prometheus-adapter
+      tag: v{{ .Values.versions.images.prometheusAdapter }}
+    prometheus:
+      url: "http://{{ .Values.releases.kubePromStack }}-prometheus.{{ .Values.namespaces.monitoring }}.svc"
+    rules: {}

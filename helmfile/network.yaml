@@ -1,0 +1,293 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+repositories:
+- name: grafana  # https://github.com/grafana/helm-charts
+  url: "https://grafana.github.io/helm-charts"
+{{- if semverCompare "<1.6" .Values.versions.images.istio }}
+- name: istio
+  url: "https://storage.googleapis.com/istio-release/releases/{{ .Values.versions.images.istio }}/charts"
+{{- end }}
+- name: jaegertracing  # src: https://github.com/jaegertracing/helm-charts
+  url: "https://jaegertracing.github.io/helm-charts"
+#- name: kiali  # https://github.com/kiali/helm-charts
+#  url: "https://kiali.org/helm-charts"
+
+templates:
+  istio:
+    values:
+    - global: &istioGlobal
+        hub: docker.io/istio
+        tag: {{ .Values.versions.images.istio }}
+        istioNamespace: {{ .Values.namespaces.network }}
+        telemetryNamespace: {{ .Values.namespaces.network }}
+        prometheusNamespace: {{ .Values.namespaces.network }}
+        policyNamespace: {{ .Values.namespaces.network }}
+        configRootNamespace: {{ .Values.namespaces.network }}
+{{- if semverCompare "<1.9" .Values.versions.images.istio }}
+        meshExpansion:
+          enabled: true
+{{- end }}
+      control: &istioControl
+        disablePolicyChecks: false
+        mtls:
+          enabled: true
+        outboundTrafficPolicy:
+          mode: ALLOW_ANY
+        proxy:
+          accessLogFile: /dev/stdout
+        sds:
+          enabled: true
+          udsPath: "unix:/var/run/sds/uds_path"
+      gateways:
+        istio-ingressgateway: &istioIngress
+          type: NodePort
+        istio-egressgateway: &istioEgress
+          type: NodePort
+    - &istioOldCertManager
+      certmanager:
+        enabled: true
+    - &istioKiali
+      kiali:
+        enabled: true
+        createDemoSecret: true
+        dashboard:
+          grafanaURL: "http://grafana.{{ .Values.namespaces.network }}.svc:3000"
+          jaegerURL: "http://{{ .Values.releases.jaegerOperator }}-jaeger-query.{{ .Values.namespaces.network }}.svc:16686"
+    - &istioMixer
+      mixer:
+        # istio-policy
+        policy:
+          enabled: true
+        # istio-telemetry/mixer-telemetry
+        adapters:
+          stdio:
+            enabled: true
+        telemetry:
+          enabled: true
+
+releases:
+# network components
+- name: {{ .Values.releases.jaegerOperator }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: jaegertracing/jaeger-operator
+  installed: {{ .Values.enables.network }}
+  version: {{ .Values.versions.charts.jaegerOperator }}
+  values:
+  - fullnameOverride: {{ .Values.releases.jaegerOperator | quote }}
+    image:
+      tag: {{ .Values.versions.images.jaeger }}
+    jaeger:
+      create: true
+      spec:  # https://www.jaegertracing.io/docs/1.16/operator/
+        strategy: allInOne
+        ingress:
+          enabled: false
+    # https://github.com/jaegertracing/jaeger-operator/issues/791
+    rbac:
+      clusterRole: true
+{{- if semverCompare "<1.6" .Values.versions.images.istio }}
+- name: {{ .Values.releases.istio.init }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: istio/istio-init
+  installed: {{ .Values.enables.network }}
+  values:
+  - *istioOldCertManager
+- name: {{ .Values.releases.istio.old }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: istio/istio
+  installed: {{ .Values.enables.network }}
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.init }}
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.jaegerOperator }}
+  {{- if .Values.enables.network }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args: ["-xec", "kubectl -n {{ .Values.namespaces.network }} wait --for condition=complete --timeout {{ .Values.helmTimeout }}s job --all"]
+  {{- end }}
+  values:
+  - fullnameOverride: {{ .Values.releases.istio.old | quote }}
+    global:
+      <<: *istioGlobal
+      <<: *istioControl
+    <<: *istioOldCertManager
+    <<: *istioKiali
+    <<: *istioMixer
+    gateways:
+      istio-ingressgateway:
+        <<: *istioIngress
+        sds:
+          enabled: true
+      istio-egressgateway:
+        <<: *istioEgress
+        enabled: true
+    # === removed in 1.6 ===
+    nodeagent:  # part of istio-proxy
+      enabled: true
+      env:
+        CA_PROVIDER: Citadel
+        CA_ADDR: "istio-citadel.{{ .Values.namespaces.network }}.svc:8060"
+        VALID_TOKEN: true
+    security:  # citadel is part of istio-pilot
+      citadelHealthCheck: true
+    sidecarInjectorWebhook:  # part of control plane (istiod)
+      enabled: true
+{{- else }}
+- name: {{ .Values.releases.istio.base }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: {{ .Values.istioManifestBase }}/charts/base
+  installed: {{ .Values.enables.network }}
+  values:
+  {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  {{- end }}
+  - global:
+      <<: *istioGlobal
+    #base:  # helm2
+    #  enableCRDTemplates: true
+- name: {{ .Values.releases.istio.control }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: {{ .Values.istioManifestBase }}/charts/istio-control/istio-discovery
+  installed: {{ .Values.enables.network }}
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.base }}
+  values:
+  {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  {{- end }}
+  - global:
+      <<: *istioGlobal
+      <<: *istioControl
+    meshConfig:
+      rootNamespace: {{ .Values.namespaces.network }}
+- name: {{ .Values.releases.istio.gateway.egress }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: {{ .Values.istioManifestBase }}/charts/gateways/istio-egress
+  installed: {{ .Values.enables.network }}
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  values:
+  {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  {{- end }}
+  - global:
+      <<: *istioGlobal
+    gateways:
+      istio-egressgateway:
+        <<: *istioEgress
+- name: {{ .Values.releases.istio.gateway.ingress }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: {{ .Values.istioManifestBase }}/charts/gateways/istio-ingress
+  installed: {{ .Values.enables.network }}
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  values:
+  {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  {{- end }}
+  - global:
+      <<: *istioGlobal
+    gateways:
+      istio-ingressgateway:
+        <<: *istioIngress
+  {{- if semverCompare "<1.8" .Values.versions.images.istio }}
+- name: {{ .Values.releases.istio.policy }}
+  namespace: {{ .Values.namespaces.network }}
+  chart: {{ .Values.istioManifestBase }}/charts/istio-policy
+  installed: {{ .Values.enables.network }}
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  values:
+    {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+    {{- end }}
+  - global:
+      <<: *istioGlobal
+    <<: *istioMixer
+  {{- end }}
+- name: {{ .Values.releases.istio.telemetry.grafana }}
+  namespace: {{ .Values.namespaces.network }}
+  installed: {{ .Values.enables.network }}
+  {{- if semverCompare "<1.8" .Values.versions.images.istio }}
+  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/grafana
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  values:
+    {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+    {{- end }}
+  - global:
+      <<: *istioGlobal
+  {{- else }}
+  chart: grafana/grafana
+  version: {{ .Values.versions.charts.grafana }}
+  values:
+  - {{ .Values.istioManifestBase }}/addons/values-grafana.yaml
+  - image:
+      tag: {{ .Values.versions.images.grafana }}
+    {{- if .Values.enables.network }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl get ns {{ .Values.namespaces.network }} || kubectl create ns {{ .Values.namespaces.network }}
+      MYTMP="$(mktemp)"
+      kubectl create configmap -n {{ .Values.namespaces.network }} istio-grafana-dashboards \
+        --from-file=pilot-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/pilot-dashboard.json" \
+        --from-file=istio-performance-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-performance-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+      kubectl create configmap -n {{ .Values.namespaces.network }} istio-services-grafana-dashboards \
+        --from-file=istio-workload-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-workload-dashboard.json" \
+        --from-file=istio-service-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-service-dashboard.json" \
+        --from-file=istio-mesh-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-mesh-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+      rm "${MYTMP}"
+    {{- end }}
+  {{- end }}
+- name: {{ .Values.releases.istio.telemetry.kiali }}
+  namespace: {{ .Values.namespaces.network }}
+  installed: {{ .Values.enables.network }}
+  {{- if semverCompare "<1.8" .Values.versions.images.istio }}
+  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/kiali
+  needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  values:
+    {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+    {{- end }}
+  - global:
+      <<: *istioGlobal
+    <<: *istioKiali
+  {{- else }}
+  chart: "{{ requiredEnv "MYDIR" }}/charts/kiali-server-1.34.1"
+  values:
+  - {{ .Values.istioManifestBase }}/addons/values-kiali.yaml
+  {{- end }}
+{{- end }}
+# https://github.com/coreos/prometheus-operator/issues/2502
+# https://github.com/istio/installer/pull/71
+- name: {{ .Values.releases.istio.telemetry.prometheusOperator }}
+  namespace: {{ .Values.namespaces.network }}
+  installed: {{ and .Values.enables.network .Values.enables.monitoring }}
+{{- if semverCompare "<1.8" .Values.versions.images.istio }}
+  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/prometheusOperator
+  needs:
+  - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
+  {{- if semverCompare "<1.6" .Values.versions.images.istio }}
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.old }}
+  {{- else }}
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  {{- end }}
+  values:
+  {{- if semverCompare "<1.9" .Values.versions.images.istio }}
+  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  {{- end }}
+  - global:
+      <<: *istioGlobal
+{{- else }}
+  chart: prometheus-community/prometheus
+  version: {{ .Values.versions.charts.prometheus }}
+  values:
+  - {{ .Values.istioManifestBase }}/addons/values-prometheus.yaml
+{{- end }}

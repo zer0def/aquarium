@@ -1,0 +1,202 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+helmDefaults:
+  wait: true
+  timeout: {{ .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+repositories:
+- name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
+  url: "https://helm.nginx.com/stable"
+- name: jetstack  # cert-manager
+  url: "https://charts.jetstack.io"
+- name: openebs
+  url: "https://openebs.github.io/charts"
+
+templates:
+  openebs:
+    values:
+    - disabledComponent: &openebsLVP
+        enabled: false
+        replicas: 0
+      openebsTag: &openebsTag
+        imageTag: {{ .Values.versions.images.openebs }}
+      openebsNdmTag: &openebsNdmTag
+        imageTag: 1.4.1
+
+releases:
+- name: openebs
+  namespace: openebs
+  chart: openebs/openebs
+  values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
+  - analytics:
+      enabled: false
+    release:
+      version: {{ .Values.versions.images.openebs }}
+    apiserver:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    provisioner:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    localprovisioner:
+      enabled: true
+      replicas: 3
+      <<: *openebsTag
+    snapshotOperator:  # not needed for just local PV
+      <<: *openebsLVP
+      controller:
+        <<: *openebsTag
+      provisioner:
+        <<: *openebsTag
+    webhook:  # not needed for just local PV
+      <<: *openebsLVP
+      <<: *openebsTag
+    jiva:
+      <<: *openebsTag
+    cstor:
+      pool:
+        <<: *openebsTag
+      poolMgmt:
+        <<: *openebsTag
+      target:
+        <<: *openebsTag
+      volumeMgmt:
+        <<: *openebsTag
+    helper:
+      <<: *openebsTag
+    policies:
+      monitoring:
+        <<: *openebsTag
+    ndmOperator:
+      enabled: false
+      <<: *openebsNdmTag
+    ndm:
+      <<: *openebsNdmTag
+      filters:
+        #includePaths: '^/dev/disk/by-path/virtio-pci-'
+        #includePaths: '^/dev/disk/by-id/scsi-.*QEMU_HARDDISK.*'
+        excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram"
+        includePaths: "/dev/loop"
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - "until kubectl -n kube-system wait --for condition=available deploy/coredns; do sleep 1; done 2>/dev/null"
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      for i in $(kubectl get sc -o jsonpath='{.items[?(@.metadata.annotations.storageclass\.kubernetes\.io/is-default-class=="true")].metadata.name}'); do
+        kubectl annotate sc ${i} storageclass.kubernetes.io/is-default-class-
+      done
+      kubectl apply -f- <<EOF
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      provisioner: openebs.io/local
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Delete
+      metadata:
+        name: {{ .Values.backingStorageClass }}
+        annotations:
+          openebs.io/cas-type: local
+          cas.openebs.io/config: |
+            - name: StorageType
+              value: "device"
+      ---
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      provisioner: openebs.io/local
+      volumeBindingMode: WaitForFirstConsumer
+      reclaimPolicy: Delete
+      metadata:
+        name: openebs-hostpath
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"
+          openebs.io/cas-type: local
+          cas.openebs.io/config: |
+            - name: StorageType
+              value: "hostpath"
+            - name: BasePath
+              value: "/var/openebs/local/"
+      EOF
+
+- name: cert-manager
+  namespace: kube-system
+  chart: jetstack/cert-manager
+  version: v1.3.1
+  labels:
+    purpose: ingress
+  values:
+  - installCRDs: true
+    ingressShim:
+      defaultIssuerName: {{ .Values.openstack.tls.certIssuers.selfsigned.name }}
+      defaultIssuerKind: {{ .Values.openstack.tls.certIssuers.selfsigned.kind }}
+      defaultIssuerGroup: "cert-manager.io"
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until kubectl -n kube-system wait --for condition=ready pod -l app.kubernetes.io/instance=cert-manager,app.kubernetes.io/component=webhook; do sleep 1; done ||:
+      until [ $(kubectl get validatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
+      until [ $(kubectl get mutatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
+      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}') -- wget https://cert-manager-webhook.kube-system.svc &>/dev/null; do sleep 1; done
+      kubectl get ns {{ .Values.openstack.namespace }} || kubectl create ns {{ .Values.openstack.namespace }}
+      kubectl apply -f- <<EOF
+      apiVersion: cert-manager.io/v1
+      kind: {{ .Values.openstack.tls.certIssuers.selfsigned.kind }}
+      metadata:
+        name: {{ .Values.openstack.tls.certIssuers.selfsigned.name }}
+        namespace: {{ .Values.openstack.namespace }}
+      spec:
+        selfSigned: {}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: {{ .Values.openstack.tls.certIssuers.openstack.name }}-tls
+        namespace: {{ .Values.openstack.namespace }}
+      spec:
+        secretName: {{ .Values.openstack.tls.certIssuers.openstack.name }}-tls
+        isCA: true
+        commonName: "{{ .Values.openstack.namespace }}.svc.cluster.local"
+        dnsNames: ["{{ .Values.openstack.namespace }}.svc.cluster.local"]
+        issuerRef:
+          {{ .Values.openstack.tls.certIssuers.selfsigned | toYaml | nindent 10 }}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: {{ .Values.openstack.tls.certIssuers.openstack.kind }}
+      metadata:
+        name: {{ .Values.openstack.tls.certIssuers.openstack.name }}
+        namespace: {{ .Values.openstack.namespace }}
+      spec:
+        ca:
+          secretName: {{ .Values.openstack.tls.certIssuers.openstack.name }}-tls
+      EOF
+
+- name: nginx
+  namespace: {{ .Values.ingress.namespace }}
+  labels:
+    purpose: ingress
+  values:
+  - controller:
+      name: ingress-api  # osh-infra hardcode
+      ingressClass: {{ .Values.ingress.class }}
+      hostNetwork: false
+      kind: daemonset
+      service:
+        name: ingress-api  # osh-infra hardcode
+        type: NodePort
+      enableCustomResources: false
+      setAsDefaultIngress: true
+      #watchNamespace: {{ .Values.openstack.namespace }}
+  chart: nginx/nginx-ingress
+  #chart: kubernetes-nginx/ingress-nginx

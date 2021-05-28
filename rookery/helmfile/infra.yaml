@@ -1,0 +1,471 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+helmDefaults:
+  wait: true
+  timeout: {{ .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+repositories:
+- name: bitnami  # https://github.com/bitnami/charts/ for Memcached, replace MySQL with pgSQL/Patroni
+  url: "https://charts.bitnami.com/bitnami"
+
+{{- $osTag := printf "%s-%s" .Values.openstack.version .Values.openstack.baseImage }}
+templates:
+  infra:
+    hooks:
+    - &helmToolkitDependencyFixup
+      events: ["prepare"]
+      command: "/bin/sh"
+      args:
+      - "-xc"
+      #- "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/openvswitch/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/powerdns/requirements.yaml"
+      - "find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/openvswitch/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/powerdns/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/rabbitmq/requirements.yaml"
+    values:
+    - &openstackCommon
+{{- if .Values.openstack.tls.enabled }}
+      manifests:
+        certificates: true
+{{- end }}
+      # related: https://docs.openstack.org/nova/latest/reference/threading.html#mysql-access-and-eventlet
+      conf:  # greenlet workaround
+{{- range $asyncSvc := list "keystone" "glance" "cinder" "heat" "neutron" "nova" "barbican" "octavia" "designate" "magnum" "senlin" }}
+        {{ $asyncSvc }}:
+          oslo_messaging_rabbit:
+            heartbeat_timeout_threshold: 0
+  {{- if $.Values.openstack.tls.enabled }}
+            ssl: true
+            ssl_ca_file: /etc/rabbitmq/certs/ca.crt
+            ssl_cert_file: /etc/rabbitmq/certs/tls.crt
+            ssl_key_file: /etc/rabbitmq/certs/tls.key
+  {{- end }}
+{{- end }}
+        logging:
+          logger_root:
+            level: TRACE
+            handlers: stdout
+{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
+          logger_{{ $logger }}:
+            level: TRACE
+{{- end }}
+      endpoints:
+        oslo_db:
+          auth:
+            admin:
+              username: {{ $.Values.credentials.database.root.user | quote }}
+              password: {{ $.Values.credentials.database.root.pass | quote }}
+              secret:
+                tls:
+{{- if .Values.openstack.tls.enabled }}
+                  internal: {{ .Values.openstack.tls.secrets.database }}
+{{- else }}
+                  internal: ""
+{{- end }}
+{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
+            {{ $osloDbSvc }}:
+              username: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "user" | quote }}
+              password: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "pass" | quote }}
+{{- end }}
+            horizon:
+              username: {{ $.Values.credentials.database.horizon.user | quote }}
+              password: {{ $.Values.credentials.database.horizon.pass | quote }}
+              engine: "django.db.backends.postgresql"
+          hosts:
+            default: {{ $.Values.credentials.database.root.host | quote }}
+          scheme: {{ $.Values.credentials.database.root.scheme | quote }}
+          port:
+            mysql:
+              default: {{ $.Values.credentials.database.root.port }}
+        oslo_messaging:
+          hosts:
+            #default: "{{ $.Values.credentials.rabbitmq.root.host }}-headless"
+            default: {{ $.Values.credentials.rabbitmq.root.host }}
+          statefulset: null
+            #replicas: {{ $.Values.openstack.rmq.replicas }}
+            #name: rabbitmq
+          auth:
+            admin:
+              username: {{ $.Values.credentials.rabbitmq.root.user | quote }}
+              password: {{ $.Values.credentials.rabbitmq.root.pass | quote }}
+{{- if .Values.openstack.tls.enabled }}
+              secret:
+                tls:
+                  internal: rabbitmq-tls-direct
+{{- end }}
+{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "barbican" "octavia" "designate" "magnum" "senlin" }}
+            {{ $rabbitSvc }}:
+              username: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "user" | quote }}
+              password: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "pass" | quote }}
+{{- end }}
+        oslo_cache:
+          hosts:
+            default: {{ .Values.memcachedCluster }}
+      images:
+        pull_policy: "Always"
+        tags:
+          bootstrap: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          db_drop: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          db_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_user: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_endpoints: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          ks_service: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          nginx: docker.io/nginx:1.18
+      network:
+{{- range $ingressSvc := list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
+        {{ $ingressSvc }}:
+          ingress:
+            annotations:
+              nginx.org/client-max-body-size: "0"
+            classes:
+              namespace: {{ $.Values.ingress.namespace }}
+              cluster: {{ $.Values.ingress.class }}
+{{- end }}
+    - labels:
+        nodeSelector: &openstackCommonNodeSelector
+          {{ $.Values.openstack.nodeSelectors.common | toYaml | nindent 10 }}
+        computeNodeSelector: &openstackComputeNodeSelector
+          <<: *openstackCommonNodeSelector
+        controlNodeSelector: &openstackControlNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronLbNodeSelector: &openstackNeutronLbNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronOvsNodeSelector: &openstackNeutronOvsNodeSelector
+          <<: *openstackCommonNodeSelector
+        neutronSriovNodeSelector: &openstackNeutronSriovNodeSelector
+          <<: *openstackCommonNodeSelector
+      issuers:
+        openstack: &openstackCAIssuer
+          issuerRef:
+            {{ .Values.openstack.tls.certIssuers.openstack | toYaml | nindent 12 }}
+
+releases:
+- name: memcached
+  namespace: {{ .Values.openstack.namespace }}
+  chart: bitnami/memcached
+  version: {{ .Values.versions.charts.memcached }}
+  labels:
+    purpose: dependency
+  needs:
+  - openebs/openebs
+  values:
+  - fullnameOverride: {{ .Values.memcachedCluster }}
+    replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
+    architecture: high-availability
+    #image:
+    #  repository: library/memcached
+    #  tag: 1.6.8-alpine
+
+- name: patroni
+  namespace: {{ .Values.openstack.namespace }}
+  #installed: false
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/zer0def/incubator/patroni"
+  labels:
+    purpose: dependency
+  needs:
+  - openebs/openebs
+  values:
+  - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
+    replicaCount: {{ .Values.patroni.replicas }}
+    image:
+      repository: {{ .Values.patroni.image }}
+      tag: {{ .Values.patroni.tag }}
+{{- if .Values.openstack.tls.enabled }}
+    tls:
+      issuerRef:
+        name: {{ .Values.openstack.tls.certIssuers.openstack.name }}
+        kind: Issuer
+    pgbouncer:
+      replicaCount: {{ .Values.patroni.bouncers }}
+      tls:
+        server:
+          issuerRef:
+            name: {{ .Values.openstack.tls.certIssuers.openstack.name }}
+            kind: Issuer
+          sslmode: verify-full
+        client:
+          secretName: {{ .Values.openstack.tls.secrets.database }}
+          issuerRef:
+            name: {{ .Values.openstack.tls.certIssuers.openstack.name }}
+            kind: Issuer
+{{- end }}
+    env:
+      ALLOW_NOSSL: "true"
+    spiloConfiguration:
+      bootstrap:
+        dcs:
+          synchronous_mode: true
+          #synchronous_mode_strict: true
+          synchronous_node_count: 1
+          postgresql:
+            parameters:
+              huge_pages: "off"
+              log_statement: "all"
+              logging_collector: "on"
+              log_min_error_statement: "info"
+        initdb:
+        - data-checksums
+        - locale: en_US.UTF-8
+        - encoding: UTF-8
+      postgresql:
+        parameters:
+          log_destination: stderr
+          logging_collector: "off"
+    credentials:
+      superuser: {{ $.Values.credentials.database.root.pass | quote }}
+    metrics:
+      postgresql:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+      patroni:
+        enabled: false
+        probes:
+          liveness:
+            enabled: false
+          readiness:
+            enabled: false
+
+- name: mariadb
+  namespace: {{ .Values.openstack.namespace }}
+  installed: false
+  chart: bitnami/mariadb-galera
+  version: {{ .Values.versions.charts.mariadb }}
+  labels:
+    purpose: dependency
+  needs:
+  - openebs/openebs
+  values:
+  - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
+    replicaCount: {{ default 1 (env "RDBMS_COUNT") }}
+    rootUser:
+      password: {{ $.Values.credentials.database.root.pass | quote }}
+    service:
+      port: {{ $.Values.credentials.database.root.port }}
+    #image:
+    #  repository: mariadb
+    #  tag: 10.5.8
+
+- name: mysql
+  namespace: {{ .Values.openstack.namespace }}
+  installed: false
+  chart: bitnami/mysql
+  version: {{ .Values.versions.charts.mysql }}
+  labels:
+    purpose: dependency
+  needs:
+  - openebs/openebs
+  values:
+  - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
+    root:
+      password: {{ $.Values.credentials.database.root.pass | quote }}
+    service:
+      port: {{ $.Values.credentials.database.root.port }}
+    #image:
+    #  repository: mysql
+    #  tag: 8.0.22
+
+- name: rabbitmq
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/rabbitmq"
+  labels:
+    purpose: dependency
+  needs:
+  - openebs/openebs
+  values:
+  - pod:
+      replicas:
+        server: {{ $.Values.openstack.rmq.replicas }}
+    labels:
+      jobs:
+        <<: *openstackControlNodeSelector
+      prometheus_rabbitmq_exporter:
+        <<: *openstackControlNodeSelector
+      server:
+        <<: *openstackControlNodeSelector
+    volume:
+      class_name: openebs-hostpath
+    network:
+      management:
+        ingress:
+          classes:
+            namespace: {{ $.Values.ingress.namespace }}
+            cluster: {{ $.Values.ingress.class }}
+          annotations:
+            nginx.org/rewrites: "serviceName=rabbitmq rewrite=/"
+    #fullnameOverride: {{ $.Values.credentials.rabbitmq.root.host | quote }}
+    endpoints:
+      oslo_messaging:
+        auth:
+          erlang_cookie: {{ $.Values.credentials.rabbitmq.root.cookie | quote }}
+          user:
+            username: {{ $.Values.credentials.rabbitmq.root.user | quote }}
+            password: {{ $.Values.credentials.rabbitmq.root.pass | quote }}
+{{- if .Values.openstack.tls.enabled }}
+        host_fqdn_override:
+          default:
+            #host: {{ $.Values.credentials.rabbitmq.root.host | quote }}
+            tls:
+              <<: *openstackCAIssuer
+              secretName: rabbitmq-tls-direct
+        port:
+          https:
+            default: 15672
+            public: 443
+    manifests:
+      certificates: true
+    conf:
+      rabbitmq:
+        ssl_options:
+          cacertfile: "/etc/rabbitmq/certs/ca.crt"
+          certfile: "/etc/rabbitmq/certs/tls.crt"
+          keyfile: "/etc/rabbitmq/certs/tls.key"
+          verify: verify_peer
+          #verify: verify_none
+          fail_if_no_peer_cert: false
+        management:
+          ssl:
+            cacertfile: "/etc/rabbitmq/certs/ca.crt"
+            certfile: "/etc/rabbitmq/certs/tls.crt"
+            keyfile: "/etc/rabbitmq/certs/tls.key"
+    secrets:
+      tls:
+        oslo_messaging:
+          server:
+            internal: rabbitmq-tls-direct
+{{- end }}
+    #image:
+    #  repository: library/rabbitmq
+    #  tag: 3.8.9-alpine
+{{/*
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until kubectl -n {{ .Values.openstack.namespace }} wait --for condition=ready pod -l app.kubernetes.io/instance=rabbitmq; do :; done
+      until kubectl -n {{ .Values.openstack.namespace }} exec -ti rabbitmq-0 -- rabbitmqctl set_user_tags {{ $.Values.credentials.rabbitmq.root.user }} management administrator; do :; done
+*/}}
+
+- name: ceph-openstack-config
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/ceph-provisioners"
+  labels:
+    purpose: dependency
+  needs:
+  - {{ .Values.rook.namespace }}/rook-operator
+  hooks:
+  - *helmToolkitDependencyFixup
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - "until kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-admin-keyring; do sleep 1; done"
+  values:
+  - labels:
+      job:
+        <<: *openstackControlNodeSelector
+      provisioner:
+        <<: *openstackControlNodeSelector
+    #manifests:
+    #  # broken in openstack-helm-infra commit 734b344bf6a2106b234bca0c927f0accb8331cf4
+    #  job_namespace_client_ceph_config: false
+    endpoints:
+      ceph_mon:
+        hosts:
+          #default: {{ .Values.rook.namespace }}-mon-a
+          default: ceph-mon
+          discovery:
+            rook_cluster: {{ .Values.rook.namespace }}
+            ceph_daemon_type: mon
+        namespace: rook-ceph
+    deployment:
+      ceph: false
+      rbd_provisioner: false
+      cephfs_provisioner: false
+      client_secrets: true
+    bootstrap:
+      enabled: false
+    network:
+      public: {{ .Values.rook.network }}
+      cluster: {{ .Values.rook.network }}
+    storageclass:
+      rbd:
+        parameters:
+          provision_storage_class: false
+          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretNamespace: {{ .Values.rook.namespace }}
+      cephfs:
+        parameters:
+          provision_storage_class: false
+          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretNamespace: {{ .Values.rook.namespace }}
+
+- name: openvswitch
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/openvswitch"
+  labels:
+    purpose: dependency
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - labels:
+      ovs:
+        <<: *openstackNeutronOvsNodeSelector
+
+- name: libvirt
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt"
+  labels:
+    purpose: dependency
+  needs:
+  - {{ .Values.openstack.namespace }}/ceph-openstack-config
+  - {{ .Values.openstack.namespace }}/keystone  # to place it in the same hierarchy level as neutron and nova
+  #- {{ .Values.openstack.namespace }}/neutron
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - images:
+      pull_policy: "Always"
+      tags:
+        libvirt: {{ .Values.registry }}/openstack/libvirt:{{ $osTag }}
+    labels:
+      agent:
+        libvirt:
+          <<: *openstackComputeNodeSelector
+    conf:
+      ceph:
+        cinder:
+          user: admin
+
+- name: powerdns
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/powerdns"
+  labels:
+    purpose: dependency
+  needs:
+  - {{ .Values.openstack.namespace }}/patroni
+  - {{ .Values.openstack.namespace }}/mariadb
+  - {{ .Values.openstack.namespace }}/mysql
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+  - labels:
+      job:
+        <<: *openstackControlNodeSelector
+      powerdns:
+        <<: *openstackControlNodeSelector
+    pod:
+      replicas:
+        server: 1
+    conf:
+      powerdns_db:
+        engine: postgres
+        #engine: mysql

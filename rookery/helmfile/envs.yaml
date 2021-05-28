@@ -1,0 +1,4 @@
+environments:
+  default:
+    values:
+    - "{{ env "MYDIR" }}/helmfile/env/default.gotmpl"
