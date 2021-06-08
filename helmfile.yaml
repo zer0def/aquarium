@@ -1,14 +1,14 @@
 {{- $helmTimeout := default 86400 (env "HELM_TIMEOUT") -}}
 
 {{- $namespaces := dict "monitoring" (default "monitoring" (env "NAMESPACES_MONITORING")) "network" (default "network" (env "NAMESPACES_NETWORK")) "serverless" (default "serverless" (env "NAMESPACES_SERVERLESS")) "serverlessFunctions" (default "serverless-fn" (env "NAMESPACES_SERVERLESS_FUNCTIONS")) "serverlessBuild" (default "serverless-bld" (env "NAMESPACES_SERVERLESS_BUILD")) "storage" (default "storage" (env "NAMESPACES_STORAGE")) -}}
-{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "ingressController" (default "nginx-ingress" (env "RELEASES_INGRESS_CONTROLLER")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "sentry" (default "sentry" (env "RELEASES_SENTRY")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
+{{- $releases := dict "certManager" (default "cert-manager" (env "RELEASES_CERT_MANAGER")) "harbor" (default "harbor" (env "RELEASES_HARBOR")) "ingressController" (default "nginx-ingress" (env "RELEASES_INGRESS_CONTROLLER")) "istio" (dict "old" (default "istio" (env "RELEASES_ISTIO")) "init" (default "istio-init" (env "RELEASES_ISTIO_INIT")) "base" (default "istio-base" (env "RELEASES_ISTIO_BASE")) "control" (default "istio-control" (env "RELEASES_ISTIO_CONTROL")) "gateway" (dict "egress" (default "istio-egress" (env "RELEASES_ISTIO_GATEWAY_EGRESS")) "ingress" (default "istio-ingress" (env "RELEASES_ISTIO_GATEWAY_INGRESS"))) "policy" (default "istio-policy" (env "RELEASES_ISTIO_POLICY")) "telemetry" (dict "grafana" (default "istio-grafana" (env "RELEASES_ISTIO_TELEMETRY_GRAFANA")) "kiali" (default "istio-kiali" (env "RELEASES_ISTIO_TELEMETRY_KIALI")) "prometheusOperator" (default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR")) "tracing" (default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING")))) "jaegerOperator" (default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR")) "kubeless" (default "kubeless" (env "RELEASES_KUBELESS")) "kubePromStack" (default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK")) "minio" (default "minio" (env "RELEASES_MINIO")) "openebs" (default "openebs" (env "RELEASES_OPENEBS")) "patroni" (default "patroni" (env "RELEASES_PATRONI")) "promscale" (default "promscale" (env "RELEASES_PROMSCALE")) "prometheusAdapter" (default "prometheus-adapter" (env "RELEASES_PROMETHEUS_ADAPTER")) "redis" (default "redis" (env "RELEASES_REDIS")) "sentry" (default "sentry" (env "RELEASES_SENTRY")) "thanos" (default "thanos" (env "RELEASES_THANOS")) -}}
 {{- $versions := dict "certManager" (default "1.1.0" (env "VERSIONS_CERT_MANAGER")) "harbor" (default "2.2.2" (env "VERSIONS_HARBOR")) "istio" (default "1.9.2" (env "VERSIONS_ISTIO")) "jaeger" (default "1.22.1" (env "VERSIONS_JAEGER")) "openebs" (default "2.9.0" (env "VERSIONS_OPENEBS")) "openebsNdm" (default "1.3.0" (env "VERSIONS_OPENEBS_NDM")) "prometheusAdapter" (default "0.8.4" (env "VERSIONS_PROMETHEUS_ADAPTER")) "sentry" (default "21.5.1" (env "VERSIONS_SENTRY")) "thanos" (default "0.20.2" (env "VERSIONS_THANOS")) -}}
 
 {{- $harbor := dict "adminPassword" (default "Harbor12345" (env "HARBOR_ADMIN_PASSWORD")) "coreHostname" (default "core.harbor.domain" (env "HARBOR_CORE_HOSTNAME")) "httpNodePort" (default "30002" (env "HARBOR_HTTP_NODEPORT")) "chartVersion" (default "1.6.2" (env "CHART_VERSIONS_HARBOR")) "db" (dict "core" (dict "name" (default "harbor_core" (env "HARBOR_DB_CORE_NAME")) "user" (default "harbor_core" (env "HARBOR_DB_CORE_USER")) "pass" (default "harbor_core" (env "HARBOR_DB_CORE_PASS"))) "notaryServer" (dict "name" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_NAME")) "user" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_USER")) "pass" (default "harbor_notary_server" (env "HARBOR_DB_NOTARY_SERVER_PASS"))) "notarySigner" (dict "name" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_NAME")) "user" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_USER")) "pass" (default "harbor_notary_signer" (env "HARBOR_DB_NOTARY_SIGNER_PASS")))) -}}
 
 {{- $istioManifestBase := "./charts/istio/manifests" -}}
 
-{{- $k8sRuntime := default "" (env "K8S_RUNTIME") -}}
+{{- $k8sRuntime := default "k3d" (env "K8S_RUNTIME") -}}
 
 {{- $kong := dict "db" (dict "user" (default "kong" (env "KONG_DB_USER")) "pass" (default "kong" (env "KONG_DB_PASS")) "name" (default "kong" (env "KONG_DB_NAME"))) }}
 {{- $kubePromStackChartVersion := "9.4.10" -}}
@@ -20,7 +20,7 @@
   {{- $openebsOmitLoopDevs = printf ",%s" $openebsOmitLoopDevs -}}
 {{- end -}}
 
-{{- $patroni := dict "replicas" 1 "bouncers" 1 "image" "registry.opensource.zalan.do/acid/spilo-13" "tag" "2.0-p7" }}
+{{- $patroni := dict "replicas" 1 "bouncers" 1 "image" "docker.io/zer0def/spilo" "tag" "13-2.0p7-tsl2.2.1-citus" }}
 {{- $patroniHashedName := printf "%s-%s" $releases.patroni (printf "%s:%s" $patroni.image $patroni.tag | sha256sum | trunc 8) }}
 
 {{- $redis := dict "password" (default "redis" (env "REDIS_PASSWORD")) "ports" (dict "readwrite" (default "6379" (env "REDIS_PORT")) "readonly" (default "6380" (env "REDIS_PORT_READONLY")) "sentinel" (default "26379" (env "REDIS_PORT_SENTINEL"))) "replicas" (dict "redis" (int (default "3" (env "REDIS_REPLICAS"))) "haproxy" (int (default "1" (env "REDIS_HAPROXY_REPLICAS")))) -}}
@@ -29,6 +29,8 @@
 
 {{- $thanosObjstoreConfig := dict "secret" (default "thanos-objstore-config" (env "THANOS_OBJSTORE_CONFIG_SECRET")) "filename" (default "object-store.yaml" (env "THANOS_OBJSTORE_CONFIG_FILENAME")) -}}
 {{- $thanosSidecarMTLSSecret := default "thanos-sidecar-mtls" (env "THANOS_SIDECAR_MTLS_SECRET") -}}
+
+{{- $timescale := dict "db" (dict "user" (default "timescale" (env "TIMESCALE_DB_USER")) "pass" (default "timescale" (env "TIMESCALE_DB_PASS")) "name" (default "timescale" (env "TIMESCALE_DB_NAME"))) }}
 
 {{- $enables := dict }}
 {{- range $i := list "monitoring" "network" "serverless" "storage" "minio" "openebs" }}
@@ -46,11 +48,11 @@ repositories:
   url: "https://kubernetes-charts.banzaicloud.com"
 - name: rancher
   url: "https://releases.rancher.com/server-charts/latest"
-- name: sentry
+- name: sentry  # https://github.com/sentry-kubernetes/charts
   url: "https://sentry-kubernetes.github.io/charts"
 
 ## storage
-- name: openebs
+- name: openebs  # https://github.com/openebs/charts
   url: "https://openebs.github.io/charts"
 - name: rook
   url: "https://charts.rook.io/release"
@@ -66,10 +68,16 @@ repositories:
   url: "https://prometheus-community.github.io/helm-charts"
 - name: dandy-developer  # https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
-- name: harbor  # src: https://github.com/goharbor/harbor-helm
+- name: harbor  # https://github.com/goharbor/harbor-helm
   url: "https://helm.goharbor.io"
 - name: yugabyte
   url: "https://charts.yugabyte.com"
+## more partially-proprietarily licensed shit, tarp inside
+# - https://github.com/timescale/promscale/tree/master/helm-chart
+# - https://github.com/timescale/timescaledb-kubernetes
+# - https://github.com/timescale/tobs
+- name: timescale
+  url: "https://charts.timescale.com"
 ## LOL SSPL-LICENSED SOFTWARE, DO NOT TOUCH
 #- name: elastic  # https://github.com/elastic/helm-charts
 #  url: "https://helm.elastic.co"
@@ -523,7 +531,7 @@ releases:
       enabled: false
       <<: *openebsNdmTag
       filters:
-        excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}"
+        {{/* excludePaths: "/dev/sd,/dev/vd,fd0,sr0,/dev/ram,/dev/dm-,/dev/md,/dev/zram{{ $openebsOmitLoopDevs }}" */}}
         includePaths: "/dev/loop"
 {{- if $enables.storage }}
   hooks:
@@ -636,6 +644,8 @@ releases:
       echo "MinIO is available under http://{{ $releases.minio }}.{{ $namespaces.storage }}.svc:{{ $minio.servicePort }} with access key \"{{ $minio.accessKey }}\", secret key \"{{ $minio.secretKey }}\" and default bucket \"{{ $minio.defaultBucket }}\"."
 {{- end }}
 
+# https://github.com/zalando/spilo
+# https://github.com/timescale/timescaledb-docker-ha
 - name: {{ $releases.patroni }}
   namespace: {{ $namespaces.storage }}
   chart: ./charts/zer0def/incubator/patroni
@@ -655,6 +665,12 @@ releases:
       #tag: 1.6-p1
       #repository: registry.opensource.zalan.do/acid/spilo-12
       #tag: 1.6-p5
+      #image: timescale/timescaledb-ha
+      #tag: pg12-latest
+      #image: registry.opensource.zalan.do/acid/spilo-13
+      #tag: 2.0-p7
+      #image: timescale/timescaledb
+      #tag: latest-pg13
       repository: {{ $patroni.image }}
       tag: {{ $patroni.tag }}
     pgbouncer:
@@ -691,24 +707,21 @@ releases:
           synchronous_mode: true
           #synchronous_mode_strict: true
           synchronous_node_count: {{ sub $patroni.replicas 1 }}
-{{/*          # works, but not for cluster-related slots
-          slots:
-            #asdf:
-            #  type: physical
-{{- range untilStep 0 (int (sub $patroni.replicas 1)) 1 }}
-            {{ printf "%s-%s" $patroniHashedName (toString .) | replace "-" "_" | quote }}:
-              type: physical
-{{- end }}
-*/}}
         initdb:
         - data-checksums
         - locale: en_US.UTF-8
         - encoding: UTF-8
       postgresql:
         use_slots: true
+        remove_data_directory_on_diverged_timelines: true
+        #use_pg_rewind: false
+        remove_data_directory_on_rewind_failure: true
         parameters:
           log_destination: stderr
           logging_collector: "off"
+          shared_preload_libraries: citus,timescaledb
+          timescaledb.license: timescale  # it's a trap!
+          timescaledb.telemetry_level: "off"
     metrics:
       postgresql:
         enabled: false
@@ -744,6 +757,9 @@ releases:
     - name: {{ $sentry.db.name | quote }}
       user: {{ $sentry.db.user | quote }}
       pass: {{ $sentry.db.pass | quote }}
+    - name: {{ $timescale.db.name | quote }}
+      user: {{ $timescale.db.user | quote }}
+      pass: {{ $timescale.db.pass | quote }}
 
 - name: {{ $releases.redis }}
   namespace: {{ $namespaces.storage }}
@@ -932,6 +948,25 @@ releases:
       replicaLabels:
       - prometheus_replica  # server-scoped
       #- prometheus  # cluster-scoped
+
+# requires non-free timescale-licensed addon to timescaledb.so
+- name: {{ $releases.promscale }}
+  namespace: {{ $namespaces.storage }}
+  chart: timescale/promscale
+  installed: {{ and $enables.storage $enables.monitoring }}
+  needs:
+  - {{ $namespaces.storage }}/{{ $releases.patroni }}
+  values:
+  - connection:
+      password:
+        timescaleDBSuperUserKey: password-superuser
+        secretTemplate: {{ $releases.patroni | quote }}
+      host:
+        nameTemplate: '{{ $releases.patroni }}.{{ $namespaces.storage }}.svc'
+    service:
+      loadBalancer:
+        enabled: false
+
 - name: {{ $releases.kubePromStack }}
   namespace: {{ $namespaces.monitoring }}
   chart: prometheus-community/kube-prometheus-stack
@@ -939,6 +974,7 @@ releases:
   installed: {{ $enables.monitoring }}
   needs:
   - {{ $namespaces.monitoring }}/{{ $releases.thanos }}
+  - {{ $namespaces.storage }}/{{ $releases.promscale }}
   values:
   - fullnameOverride: {{ $releases.kubePromStack | quote }}
     prometheus:
@@ -953,6 +989,11 @@ releases:
         podMonitorSelector:
           matchLabels: {}  # match *ALL* PodMonitors on an *empty* set of labels
         retention: 3h
+        remoteRead:
+        - url: "http://promscale-connector.{{ .Values.namespaces.storage }}.svc:9201/read"
+          readRecent: true
+        remoteWrite:
+        - url: "http://promscale-connector.{{ .Values.namespaces.storage }}.svc:9201/write"
         secrets:  # mounted under /etc/prometheus/secrets/<secret_name>/<key>
         - {{ $thanosSidecarMTLSSecret }}
         thanos:  # https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#thanosspec
