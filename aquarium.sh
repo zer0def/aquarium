@@ -507,7 +507,7 @@ main(){
   : ${INSTALL_MONITORING:=0}
   : ${INSTALL_SERVERLESS:=0}
 
-  : ${K8S_RUNTIME:=kubedee}
+  : ${K8S_RUNTIME:=k3d}
   : ${CLUSTER_NAME:=k3s-default}
   : ${NUM_WORKERS:=${DEFAULT_WORKERS}}
   : ${LXD_STORAGE_POOL:=default}
