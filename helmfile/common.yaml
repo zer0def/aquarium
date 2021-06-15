@@ -12,6 +12,8 @@ repositories:
   url: "https://charts.jetstack.io"
 - name: bitnami  # etcd, https://github.com/bitnami/charts
   url: "https://charts.bitnami.com/bitnami"
+- name: openebs  # https://github.com/openebs/charts
+  url: "https://openebs.github.io/charts"
 
 ## ingresses
 # ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
@@ -79,6 +81,7 @@ releases:
 - name: {{ .Values.releases.openebs }}
   namespace: {{ .Values.namespaces.storage }}
   chart: openebs/openebs
+  version: {{ .Values.versions.charts.openebs }}
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
   - fullnameOverride: {{ .Values.releases.openebs | quote }}
     #image:  # hopefully a temporary state of affairs
@@ -235,6 +238,44 @@ releases:
       spec:
         ca:
           secretName: selfsigned-ca-tls
+{{- end }}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: istio-root-ca-tls
+        namespace: {{ $.Values.namespaces.network }}
+      spec:
+        secretName: istio-root-ca-tls
+        isCA: true
+        commonName: "Istio Root CA"
+        issuerRef:
+          name: selfsigned
+          kind: ClusterIssuer
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Issuer
+      metadata:
+        name: istio-root-ca
+        namespace: {{ $.Values.namespaces.network }}
+      spec:
+        ca:
+          secretName: {{ $.Values.istio.certs.rootCaSecret }}
+{{- range (list "cluster0" "cluster1") }}
+      ---
+      apiVersion: cert-manager.io/v1
+      kind: Certificate
+      metadata:
+        name: {{ . }}-istio-ca-tls
+        namespace: {{ $.Values.namespaces.network }}
+      spec:
+        secretName: {{ . }}-istio-ca-tls
+        isCA: true
+        commonName: "Istio {{ . }} CA"
+        dnsNames: ["istiod.{{ $.Values.namespaces.network }}.svc.cluster.local"]
+        issuerRef:
+          name: istio-root-ca
+          kind: Issuer
 {{- end }}
       EOF
 

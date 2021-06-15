@@ -8,11 +8,9 @@
 [submodule "istio"]
 	path = charts/istio
 	url = https://github.com/istio/istio
-	branch = release-1.9
 [submodule "docker-registry-proxy"]
 	path = images/docker-registry-proxy
 	url = https://github.com/rpardini/docker-registry-proxy
-	branch = master
 [submodule "openstack-helm-images"]
 	path = images/openstack-helm-images
 	url = https://github.com/zer0def/openstack-helm-images
@@ -28,3 +26,12 @@
 [submodule "docker-powerdns"]
 	path = images/powerdns
 	url = https://github.com/NaPs/docker-powerdns
+[submodule "minio"]
+	path = charts/minio
+	url = https://github.com/zer0def/minio-chart
+[submodule "sentry"]
+	path = charts/sentry
+	url = https://github.com/zer0def/sentry-charts
+[submodule "cortex"]
+	path = charts/cortex
+	url = https://github.com/zer0def/cortex-chart

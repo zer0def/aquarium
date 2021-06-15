@@ -10,6 +10,7 @@ namespaces:
 
 releases:
   certManager: {{ default "cert-manager" (env "RELEASES_CERT_MANAGER") }}
+  clickhouse: {{ default "clickhouse" (env "RELEASES_CLICKHOUSE") }}
   cortex: {{ default "cortex" (env "RELEASES_CORTEX") }}
   etcd: {{ default "etcd" (env "RELEASES_ETCD") }}
   harbor: {{ default "harbor" (env "RELEASES_HARBOR") }}
@@ -29,6 +30,7 @@ releases:
       prometheusOperator: {{ default "istio-prometheus-operator" (env "RELEASES_ISTIO_TELEMETRY_PROMETHEUS_OPERATOR") }}
       tracing: {{ default "istio-tracing" (env "RELEASES_ISTIO_TELEMETRY_TRACING") }}
   jaegerOperator: {{ default "jaeger-operator" (env "RELEASES_JAEGER_OPERATOR") }}
+  kafka: {{ default "kafka" (env "RELEASES_KAFKA") }}
   kubeless: {{ default "kubeless" (env "RELEASES_KUBELESS") }}
   kubePromStack: {{ default "kube-prometheus-stack" (env "RELEASES_KUBE_PROMETHEUS_STACK") }}
   minio: {{ default "minio" (env "RELEASES_MINIO") }}
@@ -39,27 +41,33 @@ releases:
   redis: {{ default "redis" (env "RELEASES_REDIS") }}
   sentry: {{ default "sentry" (env "RELEASES_SENTRY") }}
   thanos: {{ default "thanos" (env "RELEASES_THANOS") }}
+  zookeeper: {{ default "zookeeper" (env "RELEASES_ZOOKEEPER") }}
 
 versions:
   charts:
     etcd: {{ default "4.12.2" (env "CHART_VERSION_ETCD") }}
     grafana: {{ default "5.8.16" (env "CHART_VERSION_GRAFANA") }}
-    harbor: {{ default "1.6.2" (env "CHART_VERSION_HARBOR") }}
+    harbor: {{ default "1.7.0" (env "CHART_VERSION_HARBOR") }}
     jaegerOperator: {{ default "2.18.0" (env "CHART_VERSION_JAEGER_OPERATOR") }}
+    kafka: {{ default "11.8.9" (env "CHART_VERSION_KAFKA") }}
+    memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
     minio: {{ default "8.0.0" (env "CHART_VERSION_MINIO") }}
+    openebs: {{ default "2.9.0" (env "CHART_VERSION_OPENEBS") }}
     openfaas: {{ default "7.0.4" (env "CHART_VERSION_OPENFAAS") }}
     prometheus: {{ default "11.16.9" (env "CHART_VERSION_PROMETHEUS") }}
+    zookeeper: {{ default "5.23.0" (env "CHART_VERSION_ZOOKEEPER") }}
   images:
     certManager: {{ default "1.3.1" (env "VERSIONS_CERT_MANAGER") }}
+    clickhouse: {{ default "20.8.9.6" (env "VERSION_CLICKHOUSE") }}
     cortex: {{ default "1.9.0" (env "VERSIONS_CORTEX") }}
-    grafana: {{ default "8.0.1" (env "VERSIONS_GRAFANA") }}
-    harbor: {{ default "2.2.2" (env "VERSIONS_HARBOR") }}
-    istio: {{ default "1.10.1" (env "VERSIONS_ISTIO") }}
-    jaeger: {{ default "1.22.1" (env "VERSIONS_JAEGER") }}
-    openebs: {{ default "2.9.0" (env "VERSIONS_OPENEBS") }}
+    grafana: {{ default "8.0.3" (env "VERSIONS_GRAFANA") }}
+    harbor: {{ default "2.3.0" (env "VERSIONS_HARBOR") }}
+    istio: {{ default "1.10.2" (env "VERSIONS_ISTIO") }}
+    jaeger: {{ default "1.23.0" (env "VERSIONS_JAEGER") }}
+    openebs: {{ default "2.10.0" (env "VERSIONS_OPENEBS") }}
     openebsNdm: {{ default "1.3.0" (env "VERSIONS_OPENEBS_NDM") }}
     prometheusAdapter: {{ default "0.8.4" (env "VERSIONS_PROMETHEUS_ADAPTER") }}
-    sentry: {{ default "21.5.1" (env "VERSIONS_SENTRY") }}
+    sentry: {{ default "21.6.1" (env "VERSIONS_SENTRY") }}
     thanos: {{ default "0.21.1" (env "VERSIONS_THANOS") }}
 
 harbor:
@@ -96,7 +104,7 @@ minio:
 # https://github.com/zalando/spilo
 # https://github.com/timescale/timescaledb-docker-ha
 patroni:
-  replicas: 1
+  replicas: 3
   bouncers: 1
   #image: registry.opensource.zalan.do/acid/spilo-10
   #tag: 1.5-p5
@@ -124,6 +132,7 @@ redis:
     haproxy: {{ int (default "1" (env "REDIS_HAPROXY_REPLICAS")) }}
 
 sentry:
+  manifestBase: "{{ requiredEnv "MYDIR" }}/charts/sentry"
   admin:
     user: "admin@sentry.local"
     password: "sentry"
@@ -144,6 +153,7 @@ timescale:
     name: {{ default "timescale" (env "TIMESCALE_DB_NAME") }}
 
 cortex:
+  manifestBase: "{{ requiredEnv "MYDIR" }}/charts/cortex"
   buckets:
     blocks: cortex-blocks
     notify: cortex-notify
@@ -151,6 +161,34 @@ cortex:
     configMap: cortex-fallback
     mountPath: /fallback
     subPath: fallback.yaml
+
+istio:
+  manifestBase: "{{ requiredEnv "MYDIR" }}/charts/istio/manifests"
+  multiCluster: true
+  meshID: "aquarium"
+  network: {{ default "k3s-default" (env "CLUSTER_NAME") | quote }}
+  cluster: {{ default "k3s-default" (env "CLUSTER_NAME") | quote }}
+  certs:
+    rootCaSecret: istio-root-ca-tls
+    clusterSecret: "{{ default "k3s-default" (env "CLUSTER_NAME") }}-istio-ca-tls"
+  gateway:
+    labels:
+      istio: eastwestgateway
+
+zookeeper:
+  replicas: 3
+
+kafka:
+  replicas: 3
+
+clickhouse:
+  image: yandex/clickhouse-server
+  replicas: 3
+  httpPort: 8123
+  tcpPort: 9000
+  firstUser:
+    username: clickhouse
+    password: clickhouse
 
 enables:
   cortex: {{ not (empty (env "ENABLE_CORTEX")) }}
@@ -162,7 +200,6 @@ enables:
   minio: {{ not (empty (env "ENABLE_MINIO")) }}
   openebs: {{ not (empty (env "ENABLE_OPENEBS")) }}
 
-istioManifestBase: "{{ requiredEnv "MYDIR" }}/charts/istio/manifests"
 k8sRuntime: {{ default "k3d" (env "K8S_RUNTIME") }}
 kubePromStackChartVersion: "9.4.10"
 #openebsOmitLoopDevs: {{ printf ",%s" (default "" (env "OPENEBS_OMIT_LOOPDEVS")) }}

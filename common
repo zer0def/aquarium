@@ -1,6 +1,6 @@
 HELM_BIN="$(command -v "${HELM:=helm}")"
 DEFAULT_PROXY_REGISTRIES=(ghcr.io k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do")
-REGISTRY_PROXY_REPO="${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.3"}"
+REGISTRY_PROXY_REPO="${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.4"}"
 KUBE_NOPROXY_SETTING=(
   '.cluster.local' '.svc'
 #  '192.168.0.0/16' '172.16.0.0/12' '10.0.0.0/8'
