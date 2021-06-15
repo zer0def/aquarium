@@ -11,6 +11,8 @@ repositories:
   url: "https://charts.timescale.com"
 - name: cortex
   url: "https://cortexproject.github.io/cortex-helm-chart"
+- name: bitnami  # etcd, https://github.com/bitnami/charts
+  url: "https://charts.bitnami.com/bitnami"
 
 templates:
   cortex:
@@ -62,10 +64,24 @@ releases:
       - prometheus_replica  # server-scoped
       #- prometheus  # cluster-scoped
 
+{{- range (list "" "-index" "-metadata") }}
+- name: {{ $.Values.releases.cortex }}-memcached-blocks{{ . }}
+  namespace: {{ $.Values.namespaces.monitoring }}
+  chart: bitnami/memcached
+  installed: {{ and $.Values.enables.monitoring $.Values.enables.minio $.Values.enables.cortex }}
+  version: {{ $.Values.versions.charts.memcached }}
+  needs:
+  - {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
+  values:
+  - architecture: high-availability
+    replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
+{{- end }}
+
 - name: {{ .Values.releases.cortex }}
   namespace: {{ .Values.namespaces.monitoring }}
-  chart: cortex/cortex
+  chart: "{{ .Values.cortex.manifestBase }}"
   installed: {{ and .Values.enables.monitoring .Values.enables.minio .Values.enables.cortex }}
+  skipDeps: true
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
 {{- if .Values.enables.cortex }}
@@ -76,8 +92,6 @@ releases:
     - "-xec"
     - |
       kubectl get ns {{ .Values.namespaces.monitoring }} || kubectl create ns {{ .Values.namespaces.monitoring }}
-      kubectl -n {{ $.Values.namespaces.storage }} exec $(kubectl -n {{ $.Values.namespaces.storage }} get pods -o jsonpath='{.items[?(@.metadata.labels.app=="minio-client")].metadata.name}' | awk '{print $1}') -- /bin/sh -xc 'mc ls {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.blocks }} || mc mb {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.blocks }}'
-      kubectl -n {{ $.Values.namespaces.storage }} exec $(kubectl -n {{ $.Values.namespaces.storage }} get pods -o jsonpath='{.items[?(@.metadata.labels.app=="minio-client")].metadata.name}' | awk '{print $1}') -- /bin/sh -xc 'mc ls {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.notify }} || mc mb {{ $.Values.minio.host }}/{{ $.Values.cortex.buckets.notify }}'
       kubectl -n {{ .Values.namespaces.monitoring }} apply -f- <<EOF
       kind: ConfigMap
       apiVersion: v1
@@ -102,10 +116,14 @@ releases:
         configMap:
           name: {{ .Values.cortex.fallbackConfig.configMap }}
           optional: false
+      - name: tmp
+        emptyDir: {}
       extraVolumeMounts:
       - mountPath: {{ .Values.cortex.fallbackConfig.mountPath }}
         name: alertmanager-fallback
         readOnly: true
+      - mountPath: /tmp
+        name: tmp
     config:  # ref: https://github.com/cortexproject/cortex/blob/master/docs/configuration/config-file-reference.md
       storage:
         engine: blocks
@@ -251,6 +269,8 @@ releases:
       grafana.ini:
         panels:
           enable_alpha: true
+        feature_toggles:
+          enable: ngalert
       additionalDataSources:
       - type: prometheus
         access: proxy
@@ -260,16 +280,13 @@ releases:
         url: "http://thanos-query-http.{{ .Values.namespaces.monitoring }}.svc:10902/"
 {{- else }}
         name: Cortex
-        url: "http://cortex-query-frontend.{{ .Values.namespaces.monitoring }}.svc:8080/prometheus"
-      #- type: camptocamp-prometheus-alertmanager-datasource
-      #  access: proxy
-      #  name: Cortex-CampToCamp
-      #  url: "http://cortex-alertmanager.{{ .Values.namespaces.monitoring }}.svc:8080/api/v1/alerts"
-      ## broken
+        #url: "http://cortex-query-frontend.{{ .Values.namespaces.monitoring }}.svc:8080/prometheus"
+        url: "http://cortex-nginx.{{ .Values.namespaces.monitoring }}.svc/api/prom"
       - type: alertmanager
         access: proxy
         name: Cortex-Alertmanager
-        url: "http://cortex-alertmanager.{{ .Values.namespaces.monitoring }}.svc:8080/alertmanager"
+        #url: "http://cortex-alertmanager.{{ .Values.namespaces.monitoring }}.svc:8080/api/prom"
+        url: "http://cortex-nginx.{{ .Values.namespaces.monitoring }}.svc/api/prom"
 {{- end }}
 
 # doc: (use autoscaling/v2beta[12] HorizontalPodAutoscaler)

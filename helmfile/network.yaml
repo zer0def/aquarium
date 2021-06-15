@@ -28,6 +28,14 @@ templates:
         meshExpansion:
           enabled: true
 {{- end }}
+{{- if .Values.istio.multiCluster }}
+        externalIstiod: true
+        meshID: "{{ .Values.istio.meshID }}"
+        multiCluster:
+          #enabled: true
+          clusterName: "{{ .Values.istio.cluster }}"
+        network: "{{ .Values.istio.network }}"
+{{- end }}
       control: &istioControl
         disablePolicyChecks: false
         mtls:
@@ -93,6 +101,7 @@ releases:
   installed: {{ .Values.enables.network }}
   values:
   - *istioOldCertManager
+
 - name: {{ .Values.releases.istio.old }}
   namespace: {{ .Values.namespaces.network }}
   chart: istio/istio
@@ -136,86 +145,265 @@ releases:
 {{- else }}
 - name: {{ .Values.releases.istio.base }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istioManifestBase }}/charts/base
+  chart: {{ .Values.istio.manifestBase }}/charts/base
   installed: {{ .Values.enables.network }}
+  {{- if .Values.istio.multiCluster }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:  # add our own remote-secret to our stash
+    - "-xec"
+    - |
+      CONFIG_CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name==\"$(kubectl config view -o jsonpath='{.current-context}')\")].context.cluster}")
+      MYTEMP="$(mktemp)"
+      cat <<EOF >"${MYTEMP}"
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: istio-remote-secret-{{ .Values.istio.cluster }}
+        namespace: {{ .Values.namespaces.network }}
+        labels:
+          istio/multiCluster: "true"
+        annotations:
+          networking.istio.io/cluster: {{ .Values.istio.cluster }}
+      stringData:
+        {{ .Values.istio.cluster }}: |
+          apiVersion: v1
+          kind: Config
+          preferences: {}
+          clusters:
+          - name: {{ .Values.istio.cluster }}
+            cluster:
+              certificate-authority-data: $(kubectl -n {{ .Values.namespaces.network }} get secret/$(kubectl -n {{ .Values.namespaces.network }} get sa/istio-reader-service-account -o jsonpath='{.secrets[0].name}') -o jsonpath='{.data.ca\.crt}')
+              server: https://$(kubectl get node -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'):6443
+              #server: $(kubectl config view -o jsonpath="{.clusters[?(@.name==\"${CONFIG_CLUSTER}\")].cluster.server}")
+          contexts:
+          - name: {{ .Values.istio.cluster }}
+            context:
+              cluster: {{ .Values.istio.cluster }}
+              user: {{ .Values.istio.cluster }}
+          current-context: {{ .Values.istio.cluster }}
+          users:
+          - name: {{ .Values.istio.cluster }}
+            user:
+              token: $(kubectl -n {{ .Values.namespaces.network }} get secret/$(kubectl -n {{ .Values.namespaces.network }} get sa/istio-reader-service-account -o jsonpath='{.secrets[0].name}') -o jsonpath='{.data.token}' | base64 -dw0)
+      EOF
+      kubectl create -f "${MYTEMP}" || kubectl replace -f "${MYTEMP}"; rm "${MYTEMP}"
+  {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
     #base:  # helm2
     #  enableCRDTemplates: true
+
+{{- $istioCaClusterKubeCfg := "" }}
+{{- if eq .Values.k8sRuntime "k3d" }}
+  {{- $istioCaClusterKubeCfg = printf "$(k3d kubeconfig write %s)" (default "cluster0" (env "ISTIO_CA_CLUSTER")) }}
+{{- else if eq .Values.k8sRuntime "kubedee" }}
+  {{- $istioCaClusterKubeCfg = printf "${HOME}/.local/share/kubedee/clusters/%s/kubeconfig/admin.kubeconfig" (default "cluster0" (env "ISTIO_CA_CLUSTER")) }}
+{{- end }}
 - name: {{ .Values.releases.istio.control }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istioManifestBase }}/charts/istio-control/istio-discovery
+  chart: {{ .Values.istio.manifestBase }}/charts/istio-control/istio-discovery
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.base }}
+  {{- if .Values.istio.multiCluster }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl label ns {{ .Values.namespaces.network }} topology.istio.io/network={{ .Values.istio.network }}
+      kubectl apply -f- <<EOF
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cacerts
+        namespace: {{ .Values.namespaces.network }}
+      type: Opaque
+      data:
+        ca-cert.pem: $(KUBECONFIG="{{ $istioCaClusterKubeCfg }}" kubectl -n {{ .Values.namespaces.network }} get secret/{{ .Values.istio.certs.clusterSecret }} -o jsonpath='{.data.tls\.crt}')
+        ca-key.pem: $(KUBECONFIG="{{ $istioCaClusterKubeCfg }}" kubectl -n {{ .Values.namespaces.network }} get secret/{{ .Values.istio.certs.clusterSecret }} -o jsonpath='{.data.tls\.key}')
+        cert-chain.pem: $(sh -ec "KUBECONFIG={{ $istioCaClusterKubeCfg }} kubectl -n {{ .Values.namespaces.network }} get secret/{{ .Values.istio.certs.clusterSecret }} -o jsonpath='{.data.tls\.crt}' | base64 -dw0; KUBECONFIG={{ $istioCaClusterKubeCfg }} kubectl -n {{ .Values.namespaces.network }} get secret/{{ .Values.istio.certs.rootCaSecret }} -o jsonpath='{.data.tls\.crt}' | base64 -dw0" | base64 -w0)
+        root-cert.pem: $(KUBECONFIG="{{ $istioCaClusterKubeCfg }}" kubectl -n {{ .Values.namespaces.network }} get secret/{{ .Values.istio.certs.rootCaSecret }} -o jsonpath='{.data.tls\.crt}')
+      EOF
+  {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
       <<: *istioControl
     meshConfig:
       rootNamespace: {{ .Values.namespaces.network }}
+
 - name: {{ .Values.releases.istio.gateway.egress }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istioManifestBase }}/charts/gateways/istio-egress
+  chart: {{ .Values.istio.manifestBase }}/charts/gateways/istio-egress
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
     gateways:
       istio-egressgateway:
         <<: *istioEgress
+
 - name: {{ .Values.releases.istio.gateway.ingress }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istioManifestBase }}/charts/gateways/istio-ingress
+  chart: {{ .Values.istio.manifestBase }}/charts/gateways/istio-ingress
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl apply -f- <<EOF
+      apiVersion: networking.istio.io/v1alpha3
+      kind: Gateway
+      metadata:
+        name: istiod-gateway
+        namespace: {{ .Values.namespaces.network }}
+      spec:
+        selector:
+          istio: eastwestgateway
+        servers:
+        - port:
+            name: tls-istiod
+            number: 15012
+            protocol: tls
+          tls:
+            mode: PASSTHROUGH
+          hosts:
+          - "*"
+        - port:
+            name: tls-istiodwebhook
+            number: 15017
+            protocol: tls
+          tls:
+            mode: PASSTHROUGH
+          hosts:
+          - "*"
+      ---
+      apiVersion: networking.istio.io/v1alpha3
+      kind: VirtualService
+      metadata:
+        name: istiod-vs
+        namespace: {{ .Values.namespaces.network }}
+      spec:
+        hosts:
+        - "*"
+        gateways:
+        - istiod-gateway
+        tls:
+        - match:
+          - port: 15012
+            sniHosts:
+            - "*"
+          route:
+          - destination:
+              host: istiod.{{ .Values.namespaces.network }}.svc.cluster.local
+              port:
+                number: 15012
+        - match:
+          - port: 15017
+            sniHosts:
+            - "*"
+          route:
+          - destination:
+              host: istiod.{{ .Values.namespaces.network }}.svc.cluster.local
+              port:
+                number: 443
+      ---
+      apiVersion: networking.istio.io/v1alpha3
+      kind: Gateway
+      metadata:
+        name: cross-network-gateway
+        namespace: {{ .Values.namespaces.network }}
+      spec:
+        selector:
+          {{ default (dict) .Values.istio.gateway.labels | toYaml | nindent 10 }}
+        servers:
+        - port:
+            number: 15443
+            name: tls
+            protocol: TLS
+          tls:
+            mode: AUTO_PASSTHROUGH
+          hosts:
+          - "*.local"
+      EOF
+      # only because we're using NodePort services
+      kubectl -n {{ .Values.namespaces.network }} patch svc/istio-eastwestgateway -p "{\"spec\":{\"externalIPs\":[\"$(kubectl get node -l node-role.kubernetes.io/master -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')\"]}}"
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
     gateways:
       istio-ingressgateway:
         <<: *istioIngress
+        name: istio-eastwestgateway
+        labels:
+          app: istio-eastwestgateway
+          topology.istio.io/network: {{ .Values.istio.network }}
+          {{ default (dict) .Values.istio.gateway.labels | toYaml | nindent 10 }}
+        env:
+          ISTIO_META_ROUTER_MODE: "sni-dnat"
+          ISTIO_META_REQUESTED_NETWORK_VIEW: {{ .Values.istio.network }}
+        ports:
+        - name: status-port
+          port: 15021
+          targetPort: 15021
+        - name: tls
+          port: 15443
+          targetPort: 15443
+        - name: tls-istiod
+          port: 15012
+          targetPort: 15012
+        - name: tls-webhook
+          port: 15017
+          targetPort: 15017
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
 - name: {{ .Values.releases.istio.policy }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istioManifestBase }}/charts/istio-policy
+  chart: {{ .Values.istio.manifestBase }}/charts/istio-policy
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
     <<: *istioMixer
   {{- end }}
+
 - name: {{ .Values.releases.istio.telemetry.grafana }}
   namespace: {{ .Values.namespaces.network }}
   installed: {{ .Values.enables.network }}
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/grafana
+  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/grafana
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
@@ -223,7 +411,7 @@ releases:
   chart: grafana/grafana
   version: {{ .Values.versions.charts.grafana }}
   values:
-  - {{ .Values.istioManifestBase }}/addons/values-grafana.yaml
+  - {{ .Values.istio.manifestBase }}/addons/values-grafana.yaml
   - image:
       tag: {{ .Values.versions.images.grafana }}
     {{- if .Values.enables.network }}
@@ -236,25 +424,26 @@ releases:
       kubectl get ns {{ .Values.namespaces.network }} || kubectl create ns {{ .Values.namespaces.network }}
       MYTMP="$(mktemp)"
       kubectl create configmap -n {{ .Values.namespaces.network }} istio-grafana-dashboards \
-        --from-file=pilot-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/pilot-dashboard.json" \
-        --from-file=istio-performance-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-performance-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+        --from-file=pilot-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/pilot-dashboard.json" \
+        --from-file=istio-performance-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-performance-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
       kubectl create configmap -n {{ .Values.namespaces.network }} istio-services-grafana-dashboards \
-        --from-file=istio-workload-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-workload-dashboard.json" \
-        --from-file=istio-service-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-service-dashboard.json" \
-        --from-file=istio-mesh-dashboard.json="{{ .Values.istioManifestBase }}/addons/dashboards/istio-mesh-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+        --from-file=istio-workload-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-workload-dashboard.json" \
+        --from-file=istio-service-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-service-dashboard.json" \
+        --from-file=istio-mesh-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-mesh-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
       rm "${MYTMP}"
     {{- end }}
   {{- end }}
+
 - name: {{ .Values.releases.istio.telemetry.kiali }}
   namespace: {{ .Values.namespaces.network }}
   installed: {{ .Values.enables.network }}
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/kiali
+  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/kiali
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
@@ -262,16 +451,17 @@ releases:
   {{- else }}
   chart: "{{ requiredEnv "MYDIR" }}/charts/kiali-server-1.34.1"
   values:
-  - {{ .Values.istioManifestBase }}/addons/values-kiali.yaml
+  - {{ .Values.istio.manifestBase }}/addons/values-kiali.yaml
   {{- end }}
 {{- end }}
+
 # https://github.com/coreos/prometheus-operator/issues/2502
 # https://github.com/istio/installer/pull/71
 - name: {{ .Values.releases.istio.telemetry.prometheusOperator }}
   namespace: {{ .Values.namespaces.network }}
   installed: {{ and .Values.enables.network .Values.enables.monitoring }}
 {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istioManifestBase }}/charts/istio-telemetry/prometheusOperator
+  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/prometheusOperator
   needs:
   - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
   {{- if semverCompare "<1.6" .Values.versions.images.istio }}
@@ -281,7 +471,7 @@ releases:
   {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istioManifestBase }}/charts/global.yaml
+  - {{ .Values.istio.manifestBase }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -289,5 +479,5 @@ releases:
   chart: prometheus-community/prometheus
   version: {{ .Values.versions.charts.prometheus }}
   values:
-  - {{ .Values.istioManifestBase }}/addons/values-prometheus.yaml
+  - {{ .Values.istio.manifestBase }}/addons/values-prometheus.yaml
 {{- end }}

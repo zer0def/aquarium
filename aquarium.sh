@@ -379,7 +379,7 @@ install_prometheus_operator(){
 }
 
 install_storage(){
-  kubectl create secret docker-registry local-harbor --docker-username=admin --docker-password="${HARBOR_ADMIN_PASSWORD:=Harbor12345}"
+  kubectl get secret local-harbor || kubectl create secret docker-registry local-harbor --docker-username=admin --docker-password="${HARBOR_ADMIN_PASSWORD:=Harbor12345}"
   install_openebs
   install_minio
   export ENABLE_STORAGE=1 \
@@ -556,7 +556,7 @@ main(){
       -N | --name) CLUSTER_NAME="${2}"; shift 2;;
       -t | --tag) RUNTIME_TAG="${2}"; shift 2;;
       -s | --storage-pool) LXD_STORAGE_POOL="${2}"; shift 2;;
-      --vm) VM_MODE="--vm"; shift;;
+      --vm) VM_MODE="--vm --rootfs-size 30GiB"; shift;;
       -c | --controller-mem) CONTROLLER_MEMORY_SIZE="${2}"; shift 2;;
       -w | --worker-mem) WORKER_MEMORY_SIZE="${2}"; shift 2;;
       -R | --rootfs-size) ROOTFS_SIZE="${2}"; shift 2;;
@@ -565,7 +565,7 @@ main(){
     esac
   done
 
-  export K8S_RUNTIME
+  export K8S_RUNTIME CLUSTER_NAME
   [ -z "${SCRIPT_OP}" ] && usage
 
   KUBEDEE_OPTS+=("${VM_MODE}"
@@ -589,8 +589,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.21.1-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.21.1}"
+    [k3d]="${RUNTIME_TAG:-1.21.2-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.21.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

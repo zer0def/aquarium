@@ -2,16 +2,16 @@ bases:
 - "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
 ---
 repositories:
-- name: openebs  # https://github.com/openebs/charts
-  url: "https://openebs.github.io/charts"
 - name: minio  # https://github.com/minio/charts
   url: "https://helm.min.io"
 - name: dandy-developer  # https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
 - name: harbor  # https://github.com/goharbor/harbor-helm
   url: "https://helm.goharbor.io"
-- name: sentry  # https://github.com/sentry-kubernetes/charts
-  url: "https://sentry-kubernetes.github.io/charts"
+#- name: sentry  # https://github.com/sentry-kubernetes/charts
+#  url: "https://sentry-kubernetes.github.io/charts"
+- name: bitnami  # https://github.com/bitnami/charts - zookeeper, kafka
+  url: "https://charts.bitnami.com/bitnami"
 
 templates:
   harbor:
@@ -39,9 +39,16 @@ releases:
       clusterIP: None
     persistence:  # parameterize based on presence of OpenEBS
       enabled: false
-    defaultBucket:
-      name: {{ .Values.minio.defaultBucket | quote }}
-      enabled: true
+    buckets:
+    - name: {{ .Values.minio.defaultBucket | quote }}
+      policy: none
+      purge: false
+    - name: {{ .Values.cortex.buckets.blocks | quote }}
+      policy: none
+      purge: false
+    - name: {{ .Values.cortex.buckets.notify | quote }}
+      policy: none
+      purge: false
     resources:
       requests:
         memory: 256Mi
@@ -118,7 +125,7 @@ releases:
         - weight: 100
           podAffinityTerm:
             topologyKey: "kubernetes.io/hostname"
-            namespaceSelector: {}
+            #namespaceSelector: {}
             labelSelector:
               matchLabels:
                 release: {{ $patroniHashedName }}
@@ -310,11 +317,75 @@ releases:
       signer:
         <<: *harborVersion
 
+- name: {{ .Values.releases.zookeeper }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: bitnami/zookeeper
+  installed: {{ .Values.enables.storage }}
+  version: {{ .Values.versions.charts.zookeeper }}
+  values:
+  - replicaCount: {{ .Values.zookeeper.replicas }}
+
+- name: {{ .Values.releases.kafka }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: bitnami/kafka
+  installed: {{ .Values.enables.storage }}
+  version: {{ .Values.versions.charts.kafka }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.zookeeper }}
+  values:
+  - replicaCount: {{ .Values.kafka.replicas }}
+    defaultReplicationFactor: {{ .Values.kafka.replicas }}
+    offsetsTopicReplicationFactor: {{ .Values.kafka.replicas }}
+    transactionStateLogReplicationFactor: {{ .Values.kafka.replicas }}
+    transactionStateLogMinIsr: {{ .Values.kafka.replicas }}
+    maxMessageBytes: "50000000"
+    socketRequestMaxBytes: "50000000"
+    allowPlaintextListener: true
+    service:
+      port: 9092
+    zookeeper:
+      enabled: false
+    externalZookeeper:
+      servers:
+      - {{ .Values.releases.zookeeper }}.{{ .Values.namespaces.storage }}.svc
+
+- name: {{ .Values.releases.clickhouse }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: "{{ .Values.sentry.manifestBase }}/clickhouse"
+  installed: {{ .Values.enables.storage }}
+  #installed: false
+  values:
+  - clickhouse:
+      replicas: {{ .Values.clickhouse.replicas | quote }}
+      image: {{ .Values.clickhouse.image }}
+      imageVersion: {{ .Values.versions.images.clickhouse }}
+      http_port: {{ .Values.clickhouse.httpPort | quote }}
+      tcp_port: {{ .Values.clickhouse.tcpPort | quote }}
+      configmap:
+        remote_servers:
+          internal_replication: true
+          replica:
+            backup:
+              enabled: false
+        users:
+          enabled: true
+          user:
+          - name: {{ .Values.clickhouse.firstUser.username }}
+            config:
+              password: {{ .Values.clickhouse.firstUser.password }}
+              networks:
+              - ::/0
+              profile: default
+              quota: default
+
 - name: {{ .Values.releases.sentry }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: sentry/sentry
   installed: {{ .Values.enables.storage }}
+  chart: "{{ .Values.sentry.manifestBase }}/sentry"
+  skipDeps: true
   needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.clickhouse }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.kafka }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
   values:
@@ -324,6 +395,9 @@ releases:
     images:
       sentry:
         tag: {{ .Values.versions.images.sentry }}
+    user:
+      email: {{ .Values.sentry.admin.user }}
+      password: {{ .Values.sentry.admin.password }}
     postgresql:
       enabled: false
     externalPostgresql:
@@ -331,13 +405,37 @@ releases:
       username: {{ .Values.sentry.db.user | quote }}
       password: {{ .Values.sentry.db.pass | quote }}
       database: {{ .Values.sentry.db.name | quote }}
-    rabbitmq:
-      enabled: false
     redis:
       enabled: false
     externalRedis:
       host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
       password: {{ .Values.redis.password | quote }}
-    user:
-      email: {{ .Values.sentry.admin.user }}
-      password: {{ .Values.sentry.admin.password }}
+    clickhouse:
+      enabled: false
+      clickhouse:
+        image: {{ .Values.clickhouse.image }}
+        imageVersion: {{ .Values.versions.images.clickhouse }}
+    externalClickhouse:
+      host: {{ .Values.releases.clickhouse }}.{{ .Values.namespaces.storage }}.svc
+      tcpPort: {{ .Values.clickhouse.tcpPort }}
+      httpPort: {{ .Values.clickhouse.httpPort }}
+      username: {{ .Values.clickhouse.firstUser.username }}
+      password: {{ .Values.clickhouse.firstUser.password }}
+      clusterName: {{ .Values.releases.clickhouse }}
+    kafka:
+      enabled: false
+    externalKafka:
+      host: {{ .Values.releases.kafka }}.{{ .Values.namespaces.storage }}.svc
+    nginx:
+      enabled: false
+    rabbitmq:
+      enabled: false
+    ingress:
+      enabled: true
+    snuba:
+{{- range (list "api" "dbInitJob" "migrateJob" "consumer" "replacer" "outcomesConsumer" "sessionsConsumer" "transactionsConsumer" "cleanupErrors" "cleanupTransactions") }}
+      {{ . }}:
+        env:
+        - name: CLICKHOUSE_PORT
+          value: {{ $.Values.clickhouse.tcpPort | quote }}
+{{- end }}
