@@ -28,7 +28,7 @@ templates:
 {{- end }}
       # related: https://docs.openstack.org/nova/latest/reference/threading.html#mysql-access-and-eventlet
       conf:  # greenlet workaround
-{{- range $asyncSvc := list "keystone" "glance" "cinder" "heat" "neutron" "nova" "barbican" "octavia" "designate" "magnum" "senlin" }}
+{{- range $asyncSvc := list "keystone" "glance" "cinder" "heat" "neutron" "nova" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" }}
         {{ $asyncSvc }}:
           oslo_messaging_rabbit:
             heartbeat_timeout_threshold: 0
@@ -43,7 +43,7 @@ templates:
           logger_root:
             level: TRACE
             handlers: stdout
-{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
+{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
           logger_{{ $logger }}:
             level: TRACE
 {{- end }}
@@ -52,36 +52,10 @@ templates:
 {{- if .Values.openstack.tls.enabled }}
         identity:
           auth:
-            admin:
+  {{- range (list "admin" "cinder" "glance" "heat" "heat_trustee" "heat_stack_user" "neutron" "nova" "placement" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" "test" }}
+            {{ . }}:
               cacert: /etc/ssl/certs/openstack-helm.crt
-            cinder:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            glance:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            heat:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            heat_trustee:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            heat_stack_user:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            neutron:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            nova:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            placement:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            barbican:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            octavia:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            designate:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            magnum:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            senlin:
-              cacert: /etc/ssl/certs/openstack-helm.crt
-            test:
-              cacert: /etc/ssl/certs/openstack-helm.crt
+  {{- end }}
           hosts:
             internal: keystone
           scheme:
@@ -90,179 +64,17 @@ templates:
             api:
               default: 443
               internal: 443
-        image:
+  {{- range $service, $endpoint := dict "image" "glance" "image_registry" "glance-registry" "volume" "cinder" "volumev2" "cinder" "volumev3" "cinder" "orchestration" "heat" "cloudformation" "cloudformation" "cloudwatch" "cloudwatch" "network" "neutron" "load_balancer" "octavia" "dns" "designate" "baremetal" "ironic" "compute" "nova" "compute_metadata" "metadata" "compute_novnc_proxy" "novncproxy" "compute_spice_proxy" "placement" "placement" "placement" "key_manager" "barbican" "dashboard" "horizon" "metering" "ceilometer" "metric" "gnocchi" "alarming" "aodh" }}
+        {{ $service }}:
           hosts:
-            default: glance
+            default: {{ $endpoint }}
           scheme:
             default: https
           port:
             api:
               default: 443
               public: 443
-        image_registry:
-          hosts:
-            default: glance-registry
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        volume:
-          hosts:
-            default: cinder
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        volumev2:
-          hosts:
-            default: cinder
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        volumev3:
-          hosts:
-            default: cinder
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        orchestration:
-          hosts:
-            default: heat
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        cloudformation:
-          hosts:
-            default: cloudformation
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        cloudwatch:
-          hosts:
-            default: cloudwatch
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        network:
-          hosts:
-            default: neutron
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        load_balancer:
-          hosts:
-            default: octavia
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        dns:
-          hosts:
-            default: designate
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        baremetal:
-          hosts:
-            default: ironic
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        compute:
-          hosts:
-            default: nova
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-            #novncproxy:
-            #  default: 443
-        compute_metadata:
-          hosts:
-            default: metadata
-          scheme:
-            default: https
-          port:
-            metadata:
-              default: 443
-              public: 443
-        compute_novnc_proxy:
-          hosts:
-            default: novncproxy
-          scheme:
-            default: https
-          port:
-            novnc_proxy:
-              default: 443
-              public: 443
-        compute_spice_proxy:
-          hosts:
-            default: placement
-          scheme:
-            default: https
-          port:
-            spice_proxy:
-              default: 443
-              public: 443
-        placement:
-          hosts:
-            default: placement
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        key_manager:
-          hosts:
-            default: barbican
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
-        dashboard:
-          hosts:
-            default: horizon
-          scheme:
-            default: https
-          port:
-            api:
-              default: 443
-              public: 443
+  {{- end }}
 {{- end }}
 */}}
         oslo_db:
@@ -277,7 +89,7 @@ templates:
 {{- else }}
                   internal: ""
 {{- end }}
-{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
+{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "gnocchi" "ceilometer" "aodh" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
             {{ $osloDbSvc }}:
               username: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "user" | quote }}
               password: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "pass" | quote }}
@@ -299,6 +111,11 @@ templates:
           statefulset: null
             #replicas: {{ $.Values.openstack.rmq.replicas }}
             #name: rabbitmq
+{{- if .Values.openstack.tls.enabled }}
+          port:
+            https:
+              default: 15672
+{{- end }}
           auth:
             admin:
               username: {{ $.Values.credentials.rabbitmq.root.user | quote }}
@@ -308,7 +125,7 @@ templates:
                 tls:
                   internal: rabbitmq-tls-direct
 {{- end }}
-{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "barbican" "octavia" "designate" "magnum" "senlin" }}
+{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" }}
             {{ $rabbitSvc }}:
               username: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "user" | quote }}
               password: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "pass" | quote }}
@@ -348,6 +165,8 @@ templates:
         neutronOvsNodeSelector: &openstackNeutronOvsNodeSelector
           <<: *openstackCommonNodeSelector
         neutronSriovNodeSelector: &openstackNeutronSriovNodeSelector
+          <<: *openstackCommonNodeSelector
+        baremetalNodeSelector: &openstackBaremetalNodeSelector
           <<: *openstackCommonNodeSelector
       issuers:
         openstack: &openstackCAIssuer
@@ -399,6 +218,7 @@ releases:
     endpoints:
       identity:
         hosts:
+          admin: keystone-api
           internal: keystone-api
         scheme:
           default: http
@@ -470,8 +290,10 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: glance-registry-tls
+    ceph_client:
+      user_secret_name: pvc-ceph-client-key
     secrets:
-      rbd: pvc-ceph-client-key
+      rbd: glance-rbd
       tls:
         image:
           api:
@@ -607,11 +429,13 @@ releases:
                 - CAP_AUDIT_WRITE
     manifests:
       network_policy: true
+    ceph_client:
+      user_secret_name: pvc-ceph-client-key
     secrets:
       rbd:
-        backup: pvc-ceph-client-key
-        volume: pvc-ceph-client-key
-        volume_external: pvc-ceph-client-key
+        backup: cinder-backup-rbd
+        volume: cinder-volume-rbd
+        volume_external: cinder-volume-ext-rbd
 {{- if .Values.openstack.tls.enabled }}
   - conf:
       cinder:
@@ -799,7 +623,6 @@ releases:
 - name: neutron
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/neutron"
-  #installed: false
   labels:
     app: openstack
   needs:
@@ -1348,6 +1171,279 @@ releases:
       replicas:
         api: 1
 
+- name: gnocchi
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/gnocchi"
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/patroni
+  - {{ .Values.openstack.namespace }}/keystone
+  values:
+  - *openstackCommon
+  - images:
+      tags:
+        db_sync: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        gnocchi_api: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        gnocchi_statsd: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        gnocchi_metricd: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        gnocchi_resources_cleaner: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        db_init_indexer: docker.io/library/postgres:13
+        gnocchi_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      metricd:
+        <<: *openstackControlNodeSelector
+      statsd:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=gnocchi-api rewrite=/"
+    ceph_client:
+      user_secret_name: pvc-ceph-client-key
+    secrets:
+      rbd: gnocchi-rbd
+      tls:
+        metric:
+          api:
+            public: gnocchi-tls
+    endpoints:
+      metric:
+        hosts:
+          default: gnocchi-api
+        scheme:
+          default: http
+        port:
+          api:
+            default: 8041
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: gnocchi-tls
+      oslo_db_postgresql:
+        hosts:
+          default: {{ $.Values.credentials.database.root.host | quote }}
+        scheme: {{ $.Values.credentials.database.root.scheme | quote }}
+        port:
+          postgresql:
+            default: {{ $.Values.credentials.database.root.port }}
+        #path: /gnocchi_indexer
+        path: /gnocchi
+        auth:
+          gnocchi:
+            username: {{ $.Values.credentials.database.gnocchi.user | quote }}
+            password: {{ $.Values.credentials.database.gnocchi.pass | quote }}
+          admin:
+            username: {{ $.Values.credentials.database.root.user | quote }}
+            password: {{ $.Values.credentials.database.root.pass | quote }}
+            secret:
+              tls:
+{{- if .Values.openstack.tls.enabled }}
+                internal: {{ .Values.openstack.tls.secrets.database }}
+{{- else }}
+                internal: ""
+{{- end }}
+    conf:
+      paste:
+        composite:gnocchi+keystone:
+          use: egg:Paste#urlmap
+          /: gnocchiversions
+          /v1: gnocchiv1+auth
+        app:gnocchiversions:
+          root: gnocchi.rest.api.VersionsController
+        app:gnocchiv1:
+          root: gnocchi.rest.api.V1Controller
+        #pipeline:gnocchiv1+keystone:
+        #  pipeline: keystone_authtoken gnocchiv1
+
+- name: ceilometer
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/ceilometer"
+  #installed: false
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  - {{ .Values.openstack.namespace }}/gnocchi
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+  - images:
+      tags:
+        ceilometer_db_sync: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_api: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_central: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_collector: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_compute: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_ipmi: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_notification: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        #db_init_mongodb: docker.io/mongo:4.4.6-bionic
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      central:
+        <<: *openstackControlNodeSelector
+      collector:
+        <<: *openstackControlNodeSelector
+      notification:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+      compute:
+        <<: *openstackComputeNodeSelector
+      ipmi:
+        <<: *openstackBaremetalNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=ceilometer-api rewrite=/"
+    conf:
+      ceilometer:
+        api:
+          aodh_is_enabled: "True"
+          gnocchi_is_enabled: "True"
+        notification:
+          messaging_urls:
+            type: multistring
+            values:
+{{- range (list "keystone" "glance" "cinder" "heat" "nova" "neutron" "barbican" "octavia" "designate") }}
+            - "rabbit://{{ $.Values.credentials.rabbitmq.root.user }}:{{ $.Values.credentials.rabbitmq.root.pass }}@{{ $.Values.credentials.rabbitmq.root.host }}:5672/{{ . }}"
+{{- end }}
+      pipeline:
+        sinks:
+        - name: meter_sink
+          transformers:
+          publishers:
+          - gnocchi://?archive_policy=low
+        - name: cpu_sink
+          transformers:
+          - name: "rate_of_change"
+            parameters:
+              target:
+                name: "cpu_util"
+                unit: "%"
+                type: "gauge"
+                max: 100
+                scale: "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
+          publishers:
+          - gnocchi://?archive_policy=low
+        - name: cpu_delta_sink
+          transformers:
+          - name: "delta"
+            parameters:
+              target:
+                name: "cpu.delta"
+              growth_only: True
+          publishers:
+          - gnocchi://?archive_policy=low
+        - name: disk_sink
+          transformers:
+          - name: "rate_of_change"
+            parameters:
+              source:
+                map_from:
+                  name: "(disk\\.device|disk)\\.(read|write)\\.(bytes|requests)"
+                  unit: "(B|request)"
+              target:
+                map_to:
+                  name: "\\1.\\2.\\3.rate"
+                  unit: "\\1/s"
+                type: "gauge"
+          publishers:
+          - gnocchi://?archive_policy=low
+        - name: network_sink
+          transformers:
+          - name: "rate_of_change"
+            parameters:
+              source:
+                map_from:
+                  name: "network\\.(incoming|outgoing)\\.(bytes|packets)"
+                  unit: "(B|packet)"
+              target:
+                map_to:
+                  name: "network.\\1.\\2.rate"
+                  unit: "\\1/s"
+                type: "gauge"
+          publishers:
+          - gnocchi://?archive_policy=low
+    manifests:
+      deployment_api: false
+      deployment_collector: false
+      job_db_init_mongodb: false
+      secret_mongodb: false
+    dependencies:
+      static:
+        db_sync:
+          jobs:
+          - ceilometer-db-init
+          services:
+          - endpoint: internal
+            service: oslo_db
+{{- range (list "api" "central" "ipmi" "collector" "compute" "notification") }}
+        {{ . }}:
+          jobs:
+          - ceilometer-db-sync
+          - ceilometer-rabbit-init
+          - ceilometer-ks-user
+          - ceilometer-ks-endpoints
+          services:
+          - endpoint: internal
+            service: identity
+          - endpoint: internal
+            service: oslo_db
+          - endpoint: internal
+            service: metric
+{{- end }}
+
+- name: aodh
+  namespace: {{ .Values.openstack.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/aodh"
+  #installed: false
+  labels:
+    app: openstack
+  needs:
+  - {{ .Values.openstack.namespace }}/keystone
+  - {{ .Values.openstack.namespace }}/ceilometer
+  hooks:
+  - *helmToolkitDependencyFixup
+  values:
+  - *openstackCommon
+  - endpoints:
+      oslo_db:
+        scheme: postgresql
+    images:
+      tags:
+        aodh_db_sync: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_api: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_evaluator: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_listener: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_notifier: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_alarms_cleaner: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+    labels:
+      api:
+        <<: *openstackControlNodeSelector
+      evaluator:
+        <<: *openstackControlNodeSelector
+      listener:
+        <<: *openstackControlNodeSelector
+      notifier:
+        <<: *openstackControlNodeSelector
+      job:
+        <<: *openstackControlNodeSelector
+    network:
+      api:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=aodh-api rewrite=/"
+
 - name: barbican
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/barbican"
@@ -1482,6 +1578,7 @@ releases:
   labels:
     app: openstack
   needs:
+  - {{ .Values.openstack.namespace }}/keystone
   - {{ .Values.openstack.namespace }}/powerdns
   hooks:
   - *helmToolkitDependencyFixup
@@ -1562,8 +1659,6 @@ releases:
   - *helmToolkitDependencyFixup
   values:
   - *openstackCommon
-{{- if .Values.openstack.tls.enabled }}
-{{- end }}
   - images:
       tags:
         magnum_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
@@ -1589,8 +1684,6 @@ releases:
   - *helmToolkitDependencyFixup
   values:
   - *openstackCommon
-{{- if .Values.openstack.tls.enabled }}
-{{- end }}
   - images:
       tags:
         senlin_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}

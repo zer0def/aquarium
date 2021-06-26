@@ -22,8 +22,7 @@ templates:
       command: "/bin/sh"
       args:
       - "-xc"
-      #- "sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/openvswitch/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/powerdns/requirements.yaml"
-      - "find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/ceph-provisioners/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/openvswitch/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/powerdns/requirements.yaml {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/rabbitmq/requirements.yaml"
+      - "find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra -type f -name requirements.lock -delete; sed -i 's#^\\(\\s*repository:\\).*#\\1 file://../helm-toolkit#g' $(find {{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra -type f -name requirements.yaml)"
     values:
     - &openstackCommon
 {{- if .Values.openstack.tls.enabled }}
@@ -47,11 +46,40 @@ templates:
           logger_root:
             level: TRACE
             handlers: stdout
-{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
+{{- range $logger := list "amqp" "amqplib" "eventletwsgi" "sqlalchemy" "boto" "keystone" "glance" "cinder" "heat" "neutron" "neutron_taas" "nova" "os.brick" "placement" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" "manila" "trove" }}
           logger_{{ $logger }}:
             level: TRACE
 {{- end }}
       endpoints:
+{{/*
+{{- if .Values.openstack.tls.enabled }}
+        identity:
+          auth:
+  {{- range (list "admin" "cinder" "glance" "heat" "heat_trustee" "heat_stack_user" "neutron" "nova" "placement" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" "test" }}
+            {{ . }}:
+              cacert: /etc/ssl/certs/openstack-helm.crt
+  {{- end }}
+          hosts:
+            internal: keystone
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              internal: 443
+  {{- range $service, $endpoint := dict "image" "glance" "image_registry" "glance-registry" "volume" "cinder" "volumev2" "cinder" "volumev3" "cinder" "orchestration" "heat" "cloudformation" "cloudformation" "cloudwatch" "cloudwatch" "network" "neutron" "load_balancer" "octavia" "dns" "designate" "baremetal" "ironic" "compute" "nova" "compute_metadata" "metadata" "compute_novnc_proxy" "novncproxy" "compute_spice_proxy" "placement" "placement" "placement" "key_manager" "barbican" "dashboard" "horizon" "metering" "ceilometer" "metric" "gnocchi" "alarming" "aodh" }}
+        {{ $service }}:
+          hosts:
+            default: {{ $endpoint }}
+          scheme:
+            default: https
+          port:
+            api:
+              default: 443
+              public: 443
+  {{- end }}
+{{- end }}
+*/}}
         oslo_db:
           auth:
             admin:
@@ -64,7 +92,7 @@ templates:
 {{- else }}
                   internal: ""
 {{- end }}
-{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
+{{- range $osloDbSvc := list "keystone" "glance" "cinder" "heat" "nova" "placement" "neutron" "gnocchi" "ceilometer" "aodh" "barbican" "octavia" "powerdns" "designate" "magnum" "senlin" }}
             {{ $osloDbSvc }}:
               username: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "user" | quote }}
               password: {{ index (default (dict) (index $.Values.credentials.database $osloDbSvc)) "pass" | quote }}
@@ -86,6 +114,11 @@ templates:
           statefulset: null
             #replicas: {{ $.Values.openstack.rmq.replicas }}
             #name: rabbitmq
+{{- if .Values.openstack.tls.enabled }}
+          port:
+            https:
+              default: 15672
+{{- end }}
           auth:
             admin:
               username: {{ $.Values.credentials.rabbitmq.root.user | quote }}
@@ -95,7 +128,7 @@ templates:
                 tls:
                   internal: rabbitmq-tls-direct
 {{- end }}
-{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "barbican" "octavia" "designate" "magnum" "senlin" }}
+{{- range $rabbitSvc := list "keystone" "glance" "cinder" "heat" "nova" "neutron" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" }}
             {{ $rabbitSvc }}:
               username: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "user" | quote }}
               password: {{ index (default (dict) (index $.Values.credentials.rabbitmq $rabbitSvc)) "pass" | quote }}
@@ -135,6 +168,8 @@ templates:
         neutronOvsNodeSelector: &openstackNeutronOvsNodeSelector
           <<: *openstackCommonNodeSelector
         neutronSriovNodeSelector: &openstackNeutronSriovNodeSelector
+          <<: *openstackCommonNodeSelector
+        baremetalNodeSelector: &openstackBaremetalNodeSelector
           <<: *openstackCommonNodeSelector
       issuers:
         openstack: &openstackCAIssuer
@@ -388,6 +423,7 @@ releases:
     deployment:
       ceph: false
       rbd_provisioner: false
+      csi_rbd_provisioner: false
       cephfs_provisioner: false
       client_secrets: true
     bootstrap:
@@ -396,12 +432,17 @@ releases:
       public: {{ .Values.rook.network }}
       cluster: {{ .Values.rook.network }}
     storageclass:
-      rbd:
+      csi_rbd:
         parameters:
           provision_storage_class: false
           adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
           adminSecretNamespace: {{ .Values.rook.namespace }}
       cephfs:
+        parameters:
+          provision_storage_class: false
+          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretNamespace: {{ .Values.rook.namespace }}
+      rbd:
         parameters:
           provision_storage_class: false
           adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"

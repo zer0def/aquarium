@@ -10,7 +10,7 @@ cat <<EOF | kubectl -n "${CEPH_NS}" exec -ti ${CEPH_POD} -- /bin/sh -ex
 ceph mgr module disable dashboard
 ceph config set mgr mgr/dashboard/server_port "${CEPH_DASH_PORT}"
 ceph config set mgr mgr/dashboard/ssl false
-ceph dashboard ac-user-create "${CEPH_USER:-admin}" -i <(echo '${CEPH_PWD}') administrator
 ceph mgr module enable dashboard
+ceph dashboard ac-user-create "${CEPH_USER:-admin}" -i <(echo '${CEPH_PWD}') administrator
 EOF
 kubectl -n "${CEPH_NS}" port-forward "svc/${CEPH_NS}-mgr-dashboard" 7000:"${CEPH_DASH_PORT}"
