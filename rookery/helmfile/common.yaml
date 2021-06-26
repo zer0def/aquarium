@@ -32,6 +32,7 @@ releases:
 - name: openebs
   namespace: openebs
   chart: openebs/openebs
+  version: {{ .Values.versions.charts.openebs }}
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
   - analytics:
       enabled: false

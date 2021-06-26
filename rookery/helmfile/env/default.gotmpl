@@ -43,6 +43,18 @@ credentials:
       name: {{ default "heat" (env "DB_HEAT_NAME") }}
       user: {{ default "heat" (env "DB_HEAT_USER") }}
       pass: {{ default "heat" (env "DB_HEAT_PASS") }}
+    gnocchi:
+      name: {{ default "gnocchi" (env "DB_GNOCCHI_NAME") }}
+      user: {{ default "gnocchi" (env "DB_GNOCCHI_USER") }}
+      pass: {{ default "gnocchi" (env "DB_GNOCCHI_PASS") }}
+    ceilometer:
+      name: {{ default "ceilometer" (env "DB_CEILOMETER_NAME") }}
+      user: {{ default "ceilometer" (env "DB_CEILOMETER_USER") }}
+      pass: {{ default "ceilometer" (env "DB_CEILOMETER_PASS") }}
+    aodh:
+      name: {{ default "aodh" (env "DB_AODH_NAME") }}
+      user: {{ default "aodh" (env "DB_AODH_USER") }}
+      pass: {{ default "aodh" (env "DB_AODH_PASS") }}
     horizon:
       name: {{ default "horizon" (env "DB_HORIZON_NAME") }}
       user: {{ default "horizon" (env "DB_HORIZON_USER") }}
@@ -97,6 +109,12 @@ credentials:
     neutron:
       user: {{ default "neutron" (env "RMQ_NEUTRON_USER") }}
       pass: {{ default "neutron" (env "RMQ_NEUTRON_PASS") }}
+    ceilometer:
+      user: {{ default "ceilometer" (env "RMQ_CEILOMETER_USER") }}
+      pass: {{ default "ceilometer" (env "RMQ_CEILOMETER_PASS") }}
+    aodh:
+      user: {{ default "aodh" (env "RMQ_AODH_USER") }}
+      pass: {{ default "aodh" (env "RMQ_AODH_PASS") }}
     barbican:
       user: {{ default "barbican" (env "RMQ_BARBICAN_USER") }}
       pass: {{ default "barbican" (env "RMQ_BARBICAN_PASS") }}
@@ -118,10 +136,11 @@ credentials:
 
 versions:
   images:
-    openebs: 2.9.0
+    openebs: 2.10.0
   charts:
     mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
     memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
+    openebs: {{ default "2.9.0" (env "CHART_VERSION_OPENEBS") }}
     rook: {{ default "v1.4.8" (env "CHART_VERSION_ROOK") }}
     mysql: {{ default "6.14.12" (env "CHART_VERSION_MYSQL") }}
 

@@ -113,8 +113,22 @@ docker build --force-rm \
 #  "${LOCI_LXD_LOCATION}" \
 #&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
 
+docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" || (docker build --force-rm \
+  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" \
+  --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
+  --build-arg FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}' \
+  --build-arg PYTHON3=yes \
+  --build-arg PIP_ARGS='${OS_PIP_ARGS[@]}' \
+  --build-arg PROJECT_RELEASE='${OS_VERSION}' \
+  --build-arg PROJECT="gnocchi" \
+  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} /tmp/gnocchi[keystone,mysql,postgresql,s3,redis,swift,ceph,prometheus,amqp1] tooz[consul,etcd,etcd3,etcd3gw,redis,postgresql,mysql,zookeeper,memcached]' \
+  --build-arg PROJECT_REPO="https://github.com/gnocchixyz/gnocchi" \
+  --build-arg PROJECT_REF="stable/4.4" \
+  "${LOCI_LXD_LOCATION}" \
+&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}")
+
     #--build-arg WHEELS="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
-for i in keystone glance cinder neutron nova placement horizon heat barbican octavia designate manila ironic magnum senlin trove; do
+for i in keystone glance cinder neutron nova placement heat ceilometer aodh barbican octavia designate manila ironic magnum senlin trove; do
   docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" || (docker build --force-rm ${LOCI_COMMON_BUILD_ARGS[@]} \
     -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" \
     --build-arg PROJECT="\${i}" \
@@ -123,6 +137,20 @@ for i in keystone glance cinder neutron nova placement horizon heat barbican oct
   && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}")
 done
 wait \$(jobs -rp)
+
+docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${OS_TAG}" || (docker build --force-rm \
+  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${OS_TAG}" \
+  --build-arg FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}' \
+  --build-arg PYTHON3=yes \
+  --build-arg PROJECT_REF='stable/${OS_VERSION}' \
+  --build-arg PROJECT_RELEASE='${OS_VERSION}' \
+  --build-arg PIP_ARGS='${OS_PIP_ARGS[@]}' \
+  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} heat-dashboard' \
+  --build-arg PROJECT="horizon" \
+  --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
+  "${LOCI_LXD_LOCATION}" \
+&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${OS_TAG}")
+
 systemctl stop docker
 zypper rm -uy docker
 EOF
@@ -137,20 +165,21 @@ up(){
     --controller-limits-memory "${CONTROLLER_MEMORY_SIZE}" \
     --worker-limits-memory "${WORKER_MEMORY_SIZE}" \
     --storage-pool "${LXD_STORAGE_POOL}" \
-    --rootfs-size "24GiB"
+    --rootfs-size "30GiB"
 
   export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" \
     LOCAL_REGISTRY_PORT="5000"
 
   KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}")
+  KUBEDEE_IFACE="$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")"
 
-  if false; then
+  if true; then
     registry_proxy_post::kubedee
     for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-(etcd|registry)$'); do
       lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
 
-      #iptables -I FORWARD -o docker0 -i kubedee-8lpln6 -j ACCEPT
-      #iptables -I FORWARD -o kubedee-8lpln6 -i docker0 -j ACCEPT
+      #iptables -I FORWARD 1 -o docker0 -i "${KUBEDEE_IFACE}" -j ACCEPT
+      #iptables -I FORWARD 1 -o "${KUBEDEE_IFACE}" -i docker0 -j ACCEPT
     done
 
     until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null
@@ -198,7 +227,7 @@ main(){
   : ${LXD_STORAGE_POOL:=default}
   : ${CLUSTER_NAME:=rookery}
   : ${NUM_WORKERS:=1}
-  : ${K8S_VERSION:=1.21.1}
+  : ${K8S_VERSION:=1.21.2}
   : ${OS_VERSION:=wallaby}
   : ${BASE_IMAGE:=ubuntu_bionic}
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
