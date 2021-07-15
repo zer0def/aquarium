@@ -18,7 +18,7 @@ repositories:
 ## ingresses
 # ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
 - name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
-  url: "https://helm.nginx.com/stable"
+  url: "https://helm.nginx.com/edge"
 # ref: https://kubernetes.github.io/ingress-nginx/user-guide/
 - name: kubernetes-nginx  # src: https://github.com/kubernetes/ingress-nginx/tree/master/charts/ingress-nginx
   url: https://kubernetes.github.io/ingress-nginx
@@ -31,11 +31,9 @@ repositories:
 #- name: elastic  # https://github.com/elastic/helm-charts
 #  url: "https://helm.elastic.co"
 
-- name: grafana-loki  # https://github.com/grafana/loki/tree/master/production/helm
-  url: "https://grafana.github.io/loki/charts"
 - name: rancher
   url: "https://releases.rancher.com/server-charts/latest"
-- name: yugabyte
+- name: yugabyte  # https://github.com/yugabyte/charts
   url: "https://charts.yugabyte.com"
 
 helmDefaults:
@@ -50,6 +48,7 @@ helmDefaults:
 #helmFiles:
 #- path: postgres-operator-helmfile.yaml
 #- path: rancher-helmfile.yaml
+
 templates:
   openebs:
     values:
@@ -67,6 +66,7 @@ releases:
   namespace: {{ .Values.namespaces.network }}
   chart: nginx/nginx-ingress
   #chart: kubernetes-nginx/ingress-nginx
+  version: {{ .Values.versions.charts.nginx }}
   labels:
     purpose: ingress
   values:
@@ -77,6 +77,8 @@ releases:
         type: NodePort
       enableCustomResources: false
       setAsDefaultIngress: true
+      image:
+        tag: {{ .Values.versions.images.nginx }}
 
 - name: {{ .Values.releases.openebs }}
   namespace: {{ .Values.namespaces.storage }}
@@ -84,6 +86,8 @@ releases:
   version: {{ .Values.versions.charts.openebs }}
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
   - fullnameOverride: {{ .Values.releases.openebs | quote }}
+    rbac:
+      pspEnabled: true
     #image:  # hopefully a temporary state of affairs
     #  repository: docker.io/
     analytics:
@@ -287,8 +291,15 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
   values:
   - statefulset:
-      replicaCount: 3
+      replicaCount: {{ .Values.etcd.replicas }}
       #podManagementPolicy: OrderedReady
+    autoCompactionMode: periodic
+    autoCompactionRetention: 1
+    extraEnvVars:
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "8589934592"
+    image:
+      tag: {{ .Values.versions.images.etcd }}
     auth:
       rbac:
         enabled: false

@@ -4,14 +4,18 @@ bases:
 repositories:
 - name: minio  # https://github.com/minio/charts
   url: "https://helm.min.io"
+- name: minio-operator  # https://github.com/minio/operator
+  url: "https://operator.min.io"
 - name: dandy-developer  # https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
 - name: harbor  # https://github.com/goharbor/harbor-helm
   url: "https://helm.goharbor.io"
-#- name: sentry  # https://github.com/sentry-kubernetes/charts
-#  url: "https://sentry-kubernetes.github.io/charts"
-- name: bitnami  # https://github.com/bitnami/charts - zookeeper, kafka
-  url: "https://charts.bitnami.com/bitnami"
+- name: sentry  # https://github.com/sentry-kubernetes/charts
+  url: "https://sentry-kubernetes.github.io/charts"
+- name: anchore  # https://github.com/anchore/anchore-charts
+  url: "https://charts.anchore.io"
+- name: scylla
+  url: "https://scylla-operator-charts.storage.googleapis.com/stable"
 
 templates:
   harbor:
@@ -32,15 +36,25 @@ releases:
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.minio | quote }}
+    image:
+      tag: {{ .Values.versions.images.minioServer }}
+    mcImage:
+      tag: {{ .Values.versions.images.minioClient }}
     accessKey: {{ .Values.minio.accessKey | quote }}
     secretKey: {{ .Values.minio.secretKey | quote }}
     service:
       port: {{ .Values.minio.servicePort }}
       clusterIP: None
-    persistence:  # parameterize based on presence of OpenEBS
-      enabled: false
+    environment:
+      ## use access/secret keys
+      MINIO_STORAGE_CLASS_RRS: "EC:2"
+    extraArgs:
+    - --console-address=:31337
     buckets:
     - name: {{ .Values.minio.defaultBucket | quote }}
+      policy: none
+      purge: false
+    - name: {{ .Values.sentry.bucket | quote }}
       policy: none
       purge: false
     - name: {{ .Values.cortex.buckets.blocks | quote }}
@@ -49,9 +63,22 @@ releases:
     - name: {{ .Values.cortex.buckets.notify | quote }}
       policy: none
       purge: false
+    - name: {{ .Values.loki.buckets.chunks | quote }}
+      policy: none
+      purge: false
+    - name: {{ .Values.loki.buckets.notify | quote }}
+      policy: none
+      purge: false
+{{- if index .Values.patroni "walBucket" }}
+    - name: {{ .Values.patroni.walBucket | quote }}
+      policy: none
+      purge: false
+{{- end }}
     resources:
       requests:
         memory: 256Mi
+    mode: distributed
+    replicas: {{ .Values.minio.replicas }}
 {{- if and .Values.enables.storage .Values.enables.minio }}
   hooks:
   - events: ["postsync"]
@@ -87,16 +114,52 @@ releases:
       echo "MinIO is available under http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }} with access key \"{{ .Values.minio.accessKey }}\", secret key \"{{ .Values.minio.secretKey }}\" and default bucket \"{{ .Values.minio.defaultBucket }}\"."
 {{- end }}
 
+- name: minio-operator
+  namespace: {{ .Values.namespaces.storage }}
+  chart: "{{ .Values.chartBases.minioOperator }}/minio-operator"
+  installed: false
+  #installed: {{ and .Values.enables.storage .Values.enables.minio }}
+{{- if ne .Values.k8sRuntime "k3d" }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - console:
+      image:
+        tag: v0.8.3
+    tenants:
+    - name: mini0
+      namespace: {{ .Values.namespaces.storage }}
+      image:
+        tag: {{ .Values.versions.images.minioServer }}
+      pools:
+      - servers: 4
+        volumesPerServer: 1
+        size: 10Gi
+      secrets:
+        enabled: true
+        name: mini0-keys
+        accessKey: {{ .Values.minio.accessKey | quote }}
+        secretKey: {{ .Values.minio.secretKey | quote }}
+      metrics:
+        enabled: true
+
 {{- $patroniHashedName := printf "%s-%s" .Values.releases.patroni (printf "%s:%s" .Values.patroni.image .Values.patroni.tag | sha256sum | trunc 8) }}
 - name: {{ .Values.releases.patroni }}
   namespace: {{ .Values.namespaces.storage }}
   chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/incubator/patroni"
   installed: {{ .Values.enables.storage }}
   needs:
+  - {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
+{{- if index .Values.patroni "etcd" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
+{{- end }}
+{{- if index .Values.patroni "walBucket" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+{{- end }}
 {{- if ne .Values.k8sRuntime "k3d" }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
-  - {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
   values:
   - fullnameOverride: {{ .Values.releases.patroni | quote }}
     replicaCount: {{ .Values.patroni.replicas }}
@@ -131,6 +194,23 @@ releases:
                 release: {{ $patroniHashedName }}
     env:
       ALLOW_NOSSL: "true"
+{{- if index .Values.patroni "walBucket" }}
+      AWS_ENDPOINT: "http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: {{ .Values.minio.accessKey | quote }}
+      AWS_SECRET_ACCESS_KEY: {{ .Values.minio.secretKey | quote }}
+      AWS_S3_FORCE_PATH_STYLE: "true"
+      USE_WALG_BACKUP: "true"
+      USE_WALG_RESTORE: "true"
+      WALG_S3_PREFIX: "s3://{{ .Values.patroni.walBucket }}"
+      WALE_S3_PREFIX: "s3://{{ .Values.patroni.walBucket }}"
+{{- end }}
+{{- if index .Values.patroni "etcd" }}
+      ETCD3_HOSTS: '"{{ .Values.releases.etcd }}-headless.{{ .Values.namespaces.storage }}.svc:2379"'
+    kubernetes:
+      dcs:
+        enable: false
+{{- end }}
     spiloConfiguration:
       bootstrap:
         dcs:
@@ -190,6 +270,99 @@ releases:
     - name: {{ .Values.timescale.db.name | quote }}
       user: {{ .Values.timescale.db.user | quote }}
       pass: {{ .Values.timescale.db.pass | quote }}
+    - name: {{ .Values.anchore.db.name | quote }}
+      user: {{ .Values.anchore.db.user | quote }}
+      pass: {{ .Values.anchore.db.pass | quote }}
+
+- name: {{ .Values.releases.cassandra }}-operator
+  namespace: {{ .Values.namespaces.storage }}
+  #chart: scylla/scylla-operator
+  chart: "{{ .Values.chartBases.scylla }}/scylla-operator"
+  installed: {{ .Values.enables.storage }}
+  needs:
+{{- if ne .Values.k8sRuntime "k3d" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until kubectl wait --for condition=established crd/scyllaclusters.scylla.scylladb.com; do sleep 1; done 2>/dev/null ||:
+      sleep 30
+  values:
+  - fullnameOverride: "{{ .Values.releases.cassandra }}-operator"
+    psp:
+      enabled: true
+    scyllaClusters:
+    - name: {{ .Values.releases.cassandra }}
+      namespace: {{ .Values.namespaces.storage }}
+      scyllaImage:
+        tag: {{ .Values.versions.images.scyllaServer }}
+      agentImage:
+        tag: {{ .Values.versions.images.scyllaAgent }}
+      alternator:
+        enabled: true
+      developerMode: true
+      sysctls:
+      - fs.aio-max-nr=2097152
+      serviceMonitor:  # parameterize
+        create: false
+      racks:
+      - {}
+
+- name: {{ .Values.releases.cassandra }}-manager
+  namespace: {{ .Values.namespaces.storage }}
+  #chart: scylla/scylla-manager
+  chart: "{{ .Values.chartBases.scylla }}/scylla-manager"
+  #installed: {{ .Values.enables.storage }}
+  installed: false
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
+{{- if ne .Values.k8sRuntime "k3d" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - fullnameOverride: "{{ .Values.releases.cassandra }}-manager"
+    image:
+      tag: {{ .Values.versions.images.scyllaManager }}
+    logLevel: trace
+    serviceMonitor:
+      create: false
+    scylla:
+      scyllaImage:
+        tag: {{ .Values.versions.images.scyllaServer }}
+      agentImage:
+        tag: {{ .Values.versions.images.scyllaAgent }}
+      alternator:
+        enabled: true
+      developerMode: true
+      serviceMonitor:  # parameterize
+        create: false
+
+- name: {{ .Values.releases.cassandra }}
+  namespace: {{ .Values.namespaces.storage }}
+  #chart: scylla/scylla
+  chart: "{{ .Values.chartBases.scylla }}/scylla"
+  #installed: {{ .Values.enables.storage }}
+  installed: false
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
+{{- if ne .Values.k8sRuntime "k3d" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - fullnameOverride: {{ .Values.releases.cassandra }}
+    scyllaImage:
+      tag: {{ .Values.versions.images.scyllaServer }}
+    agentImage:
+      tag: {{ .Values.versions.images.scyllaAgent }}
+    alternator:
+      enabled: true
+    developerMode: true
+    serviceMonitor:
+      create: false
 
 - name: {{ .Values.releases.redis }}
   namespace: {{ .Values.namespaces.storage }}
@@ -204,7 +377,7 @@ releases:
     hardAntiAffinity: false
     replicas: {{ .Values.redis.replicas.redis }}
     image:
-      tag: 6-alpine
+      tag: alpine
     haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
       enabled: true
       replicas: {{ .Values.redis.replicas.haproxy }}
@@ -215,13 +388,15 @@ releases:
         port: {{ .Values.redis.ports.readonly }}
       metrics:
         enabled: true
+      image:
+        tag: lts-alpine
     redis:
       port: {{ .Values.redis.ports.readwrite }}
     sentinel:
       port: {{ .Values.redis.ports.sentinel }}
     exporter:
       enabled: true
-      tag: v1.12.0-alpine
+      tag: alpine
       extraArgs:  # ??
         ping-on-connect: true
         redis-only-metrics: true
@@ -229,6 +404,35 @@ releases:
         enabled: true
     auth: true
     redisPassword: {{ .Values.redis.password }}
+
+- name: {{ .Values.releases.anchore }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: anchore/anchore-engine
+  #installed: {{ .Values.enables.storage }}
+  installed: {{ .Values.enables.anchore }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  values:
+  - postgresql:
+      enabled: false
+      externalEndpoint: "{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432"
+      postgresUser: {{ .Values.anchore.db.user }}
+      postgresPassword: {{ .Values.anchore.db.pass }}
+      postgresDatabase: {{ .Values.anchore.db.name }}
+    anchore-feeds-db:
+      enabled: false
+    anchoreEnterpriseFeeds:
+      enabled: false
+    anchoreEnterpriseFeedsUpgradeJob:
+      enabled: false
+    anchoreEnterpriseRbac:
+      enabled: false
+    anchoreEnterpriseReports:
+      enabled: false
+    anchoreEnterpriseUi:
+      enabled: false
+    anchore-ui-redis:
+      enabled: false
 
 - name: {{ .Values.releases.harbor }}
   namespace: {{ .Values.namespaces.storage }}
@@ -240,6 +444,70 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+{{- if .Values.enables.anchore }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      # https://github.com/anchore/harbor-scanner-adapter
+      kubectl -n {{ .Values.namespaces.storage }} apply -f- <<EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: harbor-scanner-anchore
+        labels:
+          app: harbor-scanner-anchore
+      spec:
+        selector:
+          matchLabels:
+            app: harbor-scanner-anchore
+        replicas: 1
+        template:
+          metadata:
+            labels:
+              app: harbor-scanner-anchore
+          spec:
+            containers:
+            - name: adapter
+              image: anchore/harbor-scanner-adapter:1.0.1
+              imagePullPolicy: IfNotPresent
+              env:
+              - name: SCANNER_ADAPTER_LISTEN_ADDR
+                value: ":8080"
+              - name: ANCHORE_ENDPOINT
+                value: "http://anchore-anchore-engine-api:8228"
+              - name: ANCHORE_USERNAME
+                value: {{ default "admin" (index .Values.anchore "admin_username") }}
+              - name: ANCHORE_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ .Values.releases.anchore }}-anchore-engine-admin-pass
+                    key: ANCHORE_ADMIN_PASSWORD
+              - name: ANCHORE_CLIENT_TIMEOUT_SECONDS
+                value: "60"
+              - name: SCANNER_ADAPTER_FILTER_VENDOR_IGNORED
+                value: "true"
+              - name: SCANNER_ADAPTER_LOG_LEVEL
+                value: "debug"
+              - name: SCANNER_ADAPTER_REGISTRY_TLS_VERIFY
+                value: "false"
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: harbor-scanner-anchore
+      spec:
+        selector:
+          app: harbor-scanner-anchore
+        type: ClusterIP
+        ports:
+        - protocol: TCP
+          port: 8080
+          targetPort: 8080
+      EOF
+{{- end }}
   values:
   - nameOverride: {{ .Values.releases.harbor | quote }}
     # default admin username for Harbor is `admin`
@@ -290,6 +558,11 @@ releases:
         addr: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
         #host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
         password: {{ .Values.redis.password | quote }}
+        coreDatabaseIndex: "0"
+        jobserviceDatabaseIndex: "1"
+        registryDatabaseIndex: "2"
+        chartmuseumDatabaseIndex: "3"
+        trivyAdapterIndex: "4"
     nginx:
       <<: *harborVersion
     portal:
@@ -317,43 +590,27 @@ releases:
       signer:
         <<: *harborVersion
 
-- name: {{ .Values.releases.zookeeper }}
-  namespace: {{ .Values.namespaces.storage }}
-  chart: bitnami/zookeeper
-  installed: {{ .Values.enables.storage }}
-  version: {{ .Values.versions.charts.zookeeper }}
-  values:
-  - replicaCount: {{ .Values.zookeeper.replicas }}
-
 - name: {{ .Values.releases.kafka }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: bitnami/kafka
   installed: {{ .Values.enables.storage }}
-  version: {{ .Values.versions.charts.kafka }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.zookeeper }}
+  chart: "{{ requiredEnv "MYDIR" }}/charts/redpanda/redpanda"
   values:
-  - replicaCount: {{ .Values.kafka.replicas }}
-    defaultReplicationFactor: {{ .Values.kafka.replicas }}
-    offsetsTopicReplicationFactor: {{ .Values.kafka.replicas }}
-    transactionStateLogReplicationFactor: {{ .Values.kafka.replicas }}
-    transactionStateLogMinIsr: {{ .Values.kafka.replicas }}
-    maxMessageBytes: "50000000"
-    socketRequestMaxBytes: "50000000"
-    allowPlaintextListener: true
-    service:
-      port: 9092
-    zookeeper:
-      enabled: false
-    externalZookeeper:
-      servers:
-      - {{ .Values.releases.zookeeper }}.{{ .Values.namespaces.storage }}.svc
+  - fullnameOverride: {{ .Values.releases.kafka }}
+    image:
+      tag: "v{{ .Values.versions.images.redPanda }}"
+    statefulset:
+      replicas: {{ .Values.kafka.replicas }}
+    config:  # https://vectorized.io/docs/configuration/
+      redpanda:
+        admin:
+          address: "0.0.0.0"
+        rpc_server:
+          address: "0.0.0.0"
 
 - name: {{ .Values.releases.clickhouse }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: "{{ .Values.sentry.manifestBase }}/clickhouse"
+  chart: "{{ .Values.chartBases.sentry }}/clickhouse"
   installed: {{ .Values.enables.storage }}
-  #installed: false
   values:
   - clickhouse:
       replicas: {{ .Values.clickhouse.replicas | quote }}
@@ -381,7 +638,7 @@ releases:
 - name: {{ .Values.releases.sentry }}
   namespace: {{ .Values.namespaces.storage }}
   installed: {{ .Values.enables.storage }}
-  chart: "{{ .Values.sentry.manifestBase }}/sentry"
+  chart: "{{ .Values.chartBases.sentry }}/sentry"
   skipDeps: true
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.clickhouse }}
@@ -425,17 +682,44 @@ releases:
     kafka:
       enabled: false
     externalKafka:
-      host: {{ .Values.releases.kafka }}.{{ .Values.namespaces.storage }}.svc
+      host: "{{ .Values.releases.kafka }}.{{ .Values.namespaces.storage }}.svc"
+      port: 9092
+{{/*
+{{- range $i, $v := until .Values.kafka.replicas }}
+    - host: "{{ $.Values.releases.kafka }}-{{ $i }}.{{ $.Values.releases.kafka }}.{{ $.Values.namespaces.storage }}.svc"
+      port: 9092
+{{- end }}
+*/}}
     nginx:
       enabled: false
     rabbitmq:
       enabled: false
     ingress:
       enabled: true
+    relay:
+      mode: proxy
+    filestore:
+      backend: s3
+      s3:
+        signature_version: v2
+        accessKey: {{ .Values.minio.accessKey | quote }}
+        secretKey: {{ .Values.minio.secretKey | quote }}
+        bucketName: {{ .Values.sentry.bucket | quote }}
+        endpointUrl: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
     snuba:
 {{- range (list "api" "dbInitJob" "migrateJob" "consumer" "replacer" "outcomesConsumer" "sessionsConsumer" "transactionsConsumer" "cleanupErrors" "cleanupTransactions") }}
       {{ . }}:
+        replicas: 1
         env:
         - name: CLICKHOUSE_PORT
           value: {{ $.Values.clickhouse.tcpPort | quote }}
+{{- end }}
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+{{- range $i, $v := until .Values.kafka.replicas }}
+      until kubectl -n {{ $.Values.namespaces.storage }} wait --for condition=ready pod {{ $.Values.releases.kafka }}-{{ $i }}; do sleep 1; done 2>/dev/null
 {{- end }}

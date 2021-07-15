@@ -95,18 +95,7 @@ registry_proxy_post(){
 }
 
 launch_cluster_post(){
-  # PSP
-  local ALLOW_ALL_PSP TMP_PSP="$(mktemp)"
-  : ${ALLOW_ALL_PSP:=0}
-  PRIVILEGED_PSP=99-privileged
-  RESTRICTED_PSP=01-restricted
-  [ "${ALLOW_ALL_PSP}" -eq 0 ] && DEFAULT_PSP="${PRIVILEGED_PSP}" || DEFAULT_PSP="${RESTRICTED_PSP}"
-  PRIVILEGED_PSP="${PRIVILEGED_PSP}" envsubst <"${MYDIR}/utils/manifests/priviledged-psp.yml.shtpl" >>"${TMP_PSP}"
-  RESTRICTED_PSP="${RESTRICTED_PSP}" envsubst <"${MYDIR}/utils/manifests/restricted-psp.yml.shtpl" >>"${TMP_PSP}"
-  DEFAULT_PSP="${DEFAULT_PSP}" envsubst <"${MYDIR}/utils/manifests/default-psp-crb.yml.shtpl" >>"${TMP_PSP}"
-  until kubectl apply -f "${TMP_PSP}" &>/dev/null; do :; done
-  rm "${TMP_PSP}"
-
+  until kubectl apply -f "${MYDIR}/utils/manifests/psp.yml" &>/dev/null; do :; done
   [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post ||:
 }
 
@@ -189,7 +178,7 @@ EOF
     --k3s-agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
     --k3s-server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
     --k3s-server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --k3s-server-arg '--kube-apiserver-arg=enable-admission-plugins=PodSecurityPolicy,NodeRestriction' \
+    --k3s-server-arg "--kube-apiserver-arg=enable-admission-plugins=NodeRestriction${PSP_ENABLED:+,PodSecurityPolicy}" \
     -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
     -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
@@ -218,13 +207,15 @@ launch_cluster::kubedee(){
 
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
-  "${MYDIR}/kubedee/kubedee" \
+  "${MYDIR}/kubedee/kubedee" ${PSP_ENABLED:+--install-psps} \
     --apiserver-extra-hostnames "kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local" \
     --kubernetes-version "v${RUNTIME_VERSIONS[kubedee]}" \
     --num-worker "${NUM_WORKERS}" \
     --storage-pool "${LXD_STORAGE_POOL}" \
     ${KUBEDEE_OPTS[@]} up "${CLUSTER_NAME}"
   $("${MYDIR}/kubedee/kubedee" kubectl-env "${CLUSTER_NAME}")
+
+  launch_cluster_post
 
   until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null ||:
   until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null ||:
@@ -237,8 +228,6 @@ launch_cluster::kubedee(){
     lxc exec "${i}" -- /bin/sh -c 'mkdir -p /run/kata-containers/shared/sandboxes; mount --bind --make-rshared /run/kata-containers/shared/sandboxes /run/kata-containers/shared/sandboxes'
     RESTART_CRIO=0
   done
-
-  launch_cluster_post
 
   [ "${RESTART_CRIO}" -eq 0 ] && for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-(etcd|registry)$'); do
     lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
@@ -281,8 +270,8 @@ teardown_cluster::kubedee(){
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
-    [v1.21]="v2.3.0"
-    [v1.20]="v2.3.0"
+    [v1.21]="v2.3.1"
+    [v1.20]="v2.3.1"
     [v1.19]="v2.0.5"
     [v1.18]="v2.0.3"
     [v1.17]="v2.0.0-rc7"
@@ -514,7 +503,7 @@ main(){
   : ${LXD_STORAGE_POOL:=default}
 
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
-  : ${WORKER_MEMORY_SIZE:=8GiB}
+  : ${WORKER_MEMORY_SIZE:=16GiB}
   : ${ROOTFS_SIZE:=30GiB}
 
   while [ "${#}" -gt 0 ]; do
@@ -553,6 +542,10 @@ main(){
         esac
         shift 2
         ;;
+      -p | --psp)
+        PSP_ENABLED="0"
+        shift
+        ;;
       -N | --name) CLUSTER_NAME="${2}"; shift 2;;
       -t | --tag) RUNTIME_TAG="${2}"; shift 2;;
       -s | --storage-pool) LXD_STORAGE_POOL="${2}"; shift 2;;
@@ -589,8 +582,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.21.2-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.21.2}"
+    [k3d]="${RUNTIME_TAG:-1.21.5-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.22.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

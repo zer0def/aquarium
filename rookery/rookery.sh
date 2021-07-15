@@ -153,6 +153,7 @@ docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${O
 
 systemctl stop docker
 zypper rm -uy docker
+ip link delete docker0
 EOF
 }
 
@@ -178,8 +179,8 @@ up(){
     for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-(etcd|registry)$'); do
       lxc exec "${i}" -- /bin/sh -c 'systemctl daemon-reload; systemctl restart crio'
 
-      #iptables -I FORWARD 1 -o docker0 -i "${KUBEDEE_IFACE}" -j ACCEPT
-      #iptables -I FORWARD 1 -o "${KUBEDEE_IFACE}" -i docker0 -j ACCEPT
+      #iptables -I FORWARD 1 -o docker0 -i "$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")" -j ACCEPT
+      #iptables -I FORWARD 1 -o "$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")" -i docker0 -j ACCEPT
     done
 
     until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null
@@ -227,7 +228,7 @@ main(){
   : ${LXD_STORAGE_POOL:=default}
   : ${CLUSTER_NAME:=rookery}
   : ${NUM_WORKERS:=1}
-  : ${K8S_VERSION:=1.21.2}
+  : ${K8S_VERSION:=1.22.2}
   : ${OS_VERSION:=wallaby}
   : ${BASE_IMAGE:=ubuntu_bionic}
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}

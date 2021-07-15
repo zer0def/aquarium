@@ -2,7 +2,7 @@ bases:
 - "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
 ---
 repositories:
-- name: kong
+- name: kong  # https://github.com/Kong/charts
   url: https://charts.konghq.com
 - name: openfaas  # https://github.com/openfaas/faas-netes/tree/master/chart
   url: "https://openfaas.github.io/faas-netes"
@@ -70,6 +70,7 @@ releases:
       kubectl label ns {{ .Values.namespaces.serverlessFunctions }} istio-injection=enabled
   {{- end }}
   {{- if .Values.enables.serverless }}
+      until kubectl wait --for condition=established crd/profiles.openfaas.com; do sleep 1; done 2>/dev/null ||:
       kubectl apply -f- <<EOF
       kind: Profile
       apiVersion: openfaas.com/v1

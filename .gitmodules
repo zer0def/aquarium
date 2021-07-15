@@ -26,12 +26,27 @@
 [submodule "docker-powerdns"]
 	path = images/powerdns
 	url = https://github.com/NaPs/docker-powerdns
-[submodule "minio"]
-	path = charts/minio
-	url = https://github.com/zer0def/minio-chart
 [submodule "sentry"]
 	path = charts/sentry
 	url = https://github.com/zer0def/sentry-charts
 [submodule "cortex"]
 	path = charts/cortex
 	url = https://github.com/zer0def/cortex-chart
+[submodule "promscale"]
+	path = charts/promscale
+	url = https://github.com/zer0def/promscale
+[submodule "scylla"]
+	path = charts/scylla
+	url = https://github.com/zer0def/scylla-operator
+[submodule "minio-operator"]
+	path = charts/minio-operator
+	url = https://github.com/zer0def/minio-operator
+[submodule "sapcc"]
+	path = charts/sapcc
+	url = https://github.com/zer0def/sapcc-charts
+[submodule "redpanda"]
+	path = charts/redpanda
+	url = https://github.com/zer0def/redpanda-chart
+[submodule "minio"]
+	path = charts/minio
+	url = https://github.com/zer0def/minio

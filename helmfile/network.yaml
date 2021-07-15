@@ -5,7 +5,7 @@ repositories:
 - name: grafana  # https://github.com/grafana/helm-charts
   url: "https://grafana.github.io/helm-charts"
 {{- if semverCompare "<1.6" .Values.versions.images.istio }}
-- name: istio
+- name: istio  # https://github.com/istio/istio/tree/master/manifests/charts
   url: "https://storage.googleapis.com/istio-release/releases/{{ .Values.versions.images.istio }}/charts"
 {{- end }}
 - name: jaegertracing  # src: https://github.com/jaegertracing/helm-charts
@@ -145,7 +145,7 @@ releases:
 {{- else }}
 - name: {{ .Values.releases.istio.base }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istio.manifestBase }}/charts/base
+  chart: {{ .Values.chartBases.istio }}/charts/base
   installed: {{ .Values.enables.network }}
   {{- if .Values.istio.multiCluster }}
   hooks:
@@ -192,7 +192,7 @@ releases:
   {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -207,7 +207,7 @@ releases:
 {{- end }}
 - name: {{ .Values.releases.istio.control }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istio.manifestBase }}/charts/istio-control/istio-discovery
+  chart: {{ .Values.chartBases.istio }}/charts/istio-control/istio-discovery
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.base }}
@@ -235,7 +235,7 @@ releases:
   {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -245,13 +245,13 @@ releases:
 
 - name: {{ .Values.releases.istio.gateway.egress }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istio.manifestBase }}/charts/gateways/istio-egress
+  chart: {{ .Values.chartBases.istio }}/charts/gateways/istio-egress
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -261,7 +261,7 @@ releases:
 
 - name: {{ .Values.releases.istio.gateway.ingress }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istio.manifestBase }}/charts/gateways/istio-ingress
+  chart: {{ .Values.chartBases.istio }}/charts/gateways/istio-ingress
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
@@ -350,7 +350,7 @@ releases:
       kubectl -n {{ .Values.namespaces.network }} patch svc/istio-eastwestgateway -p "{\"spec\":{\"externalIPs\":[\"$(kubectl get node -l node-role.kubernetes.io/master -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')\"]}}"
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -381,13 +381,13 @@ releases:
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
 - name: {{ .Values.releases.istio.policy }}
   namespace: {{ .Values.namespaces.network }}
-  chart: {{ .Values.istio.manifestBase }}/charts/istio-policy
+  chart: {{ .Values.chartBases.istio }}/charts/istio-policy
   installed: {{ .Values.enables.network }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
@@ -398,12 +398,12 @@ releases:
   namespace: {{ .Values.namespaces.network }}
   installed: {{ .Values.enables.network }}
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/grafana
+  chart: {{ .Values.chartBases.istio }}/charts/istio-telemetry/grafana
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
@@ -411,7 +411,7 @@ releases:
   chart: grafana/grafana
   version: {{ .Values.versions.charts.grafana }}
   values:
-  - {{ .Values.istio.manifestBase }}/addons/values-grafana.yaml
+  - {{ .Values.chartBases.istio }}/addons/values-grafana.yaml
   - image:
       tag: {{ .Values.versions.images.grafana }}
     {{- if .Values.enables.network }}
@@ -424,12 +424,12 @@ releases:
       kubectl get ns {{ .Values.namespaces.network }} || kubectl create ns {{ .Values.namespaces.network }}
       MYTMP="$(mktemp)"
       kubectl create configmap -n {{ .Values.namespaces.network }} istio-grafana-dashboards \
-        --from-file=pilot-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/pilot-dashboard.json" \
-        --from-file=istio-performance-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-performance-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+        --from-file=pilot-dashboard.json="{{ .Values.chartBases.istio }}/addons/dashboards/pilot-dashboard.json" \
+        --from-file=istio-performance-dashboard.json="{{ .Values.chartBases.istio }}/addons/dashboards/istio-performance-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
       kubectl create configmap -n {{ .Values.namespaces.network }} istio-services-grafana-dashboards \
-        --from-file=istio-workload-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-workload-dashboard.json" \
-        --from-file=istio-service-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-service-dashboard.json" \
-        --from-file=istio-mesh-dashboard.json="{{ .Values.istio.manifestBase }}/addons/dashboards/istio-mesh-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
+        --from-file=istio-workload-dashboard.json="{{ .Values.chartBases.istio }}/addons/dashboards/istio-workload-dashboard.json" \
+        --from-file=istio-service-dashboard.json="{{ .Values.chartBases.istio }}/addons/dashboards/istio-service-dashboard.json" \
+        --from-file=istio-mesh-dashboard.json="{{ .Values.chartBases.istio }}/addons/dashboards/istio-mesh-dashboard.json" -o yaml --dry-run=client >"${MYTMP}"; kubectl create -f "${MYTMP}" || kubectl replace -f "${MYTMP}"
       rm "${MYTMP}"
     {{- end }}
   {{- end }}
@@ -438,20 +438,20 @@ releases:
   namespace: {{ .Values.namespaces.network }}
   installed: {{ .Values.enables.network }}
   {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/kiali
+  chart: {{ .Values.chartBases.istio }}/charts/istio-telemetry/kiali
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.istio.control }}
   values:
     {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
     {{- end }}
   - global:
       <<: *istioGlobal
     <<: *istioKiali
   {{- else }}
-  chart: "{{ requiredEnv "MYDIR" }}/charts/kiali-server-1.34.1"
+  chart: "{{ requiredEnv "MYDIR" }}/charts/kiali-server-{{ .Values.versions.charts.kiali }}"
   values:
-  - {{ .Values.istio.manifestBase }}/addons/values-kiali.yaml
+  - {{ .Values.chartBases.istio }}/addons/values-kiali.yaml
   {{- end }}
 {{- end }}
 
@@ -461,7 +461,7 @@ releases:
   namespace: {{ .Values.namespaces.network }}
   installed: {{ and .Values.enables.network .Values.enables.monitoring }}
 {{- if semverCompare "<1.8" .Values.versions.images.istio }}
-  chart: {{ .Values.istio.manifestBase }}/charts/istio-telemetry/prometheusOperator
+  chart: {{ .Values.chartBases.istio }}/charts/istio-telemetry/prometheusOperator
   needs:
   - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
   {{- if semverCompare "<1.6" .Values.versions.images.istio }}
@@ -471,7 +471,7 @@ releases:
   {{- end }}
   values:
   {{- if semverCompare "<1.9" .Values.versions.images.istio }}
-  - {{ .Values.istio.manifestBase }}/charts/global.yaml
+  - {{ .Values.chartBases.istio }}/charts/global.yaml
   {{- end }}
   - global:
       <<: *istioGlobal
@@ -479,5 +479,5 @@ releases:
   chart: prometheus-community/prometheus
   version: {{ .Values.versions.charts.prometheus }}
   values:
-  - {{ .Values.istio.manifestBase }}/addons/values-prometheus.yaml
+  - {{ .Values.chartBases.istio }}/addons/values-prometheus.yaml
 {{- end }}

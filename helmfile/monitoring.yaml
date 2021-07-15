@@ -9,20 +9,22 @@ repositories:
 # - https://github.com/timescale/tobs
 - name: timescale
   url: "https://charts.timescale.com"
-- name: cortex
-  url: "https://cortexproject.github.io/cortex-helm-chart"
-- name: bitnami  # etcd, https://github.com/bitnami/charts
+- name: bitnami  # memcached, https://github.com/bitnami/charts
   url: "https://charts.bitnami.com/bitnami"
+- name: cortex  # https://github.com/cortexproject/cortex-helm-chart
+  url: "https://cortexproject.github.io/cortex-helm-chart"
+- name: grafana  # https://github.com/grafana/helm-charts
+  url: "https://grafana.github.io/helm-charts"
 
 templates:
   cortex:
     values:
-    - &etcdKvStore
+    - &cortexEtcdKvStore
       store: etcd
       etcd:
+        endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
         tls_enabled: false
         tls_insecure_skip_verify: false
-        endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
     - &cortexS3
       endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
       access_key_id: {{ .Values.minio.accessKey | quote }}
@@ -31,8 +33,23 @@ templates:
       signature_version: v2
     - &cortexBlockKvStore
       kvstore:
-        <<: *etcdKvStore
+        <<: *cortexEtcdKvStore
         prefix: "cortex/collectors/"
+  grafana:
+    values:
+    - &grafanaRedis
+      endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+      password: {{ .Values.redis.password | quote }}
+    - &etcdKvStore
+      store: etcd
+      etcd:
+        endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
+    - &grafanaS3
+      endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+      access_key_id: {{ .Values.minio.accessKey | quote }}
+      secret_access_key: {{ .Values.minio.secretKey | quote }}
+      s3forcepathstyle: true
+      insecure: true
 
 releases:
 - name: {{ .Values.releases.thanos }}
@@ -75,11 +92,13 @@ releases:
   values:
   - architecture: high-availability
     replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
+    image:
+      tag: {{ $.Values.versions.images.memcached }}
 {{- end }}
 
 - name: {{ .Values.releases.cortex }}
   namespace: {{ .Values.namespaces.monitoring }}
-  chart: "{{ .Values.cortex.manifestBase }}"
+  chart: "{{ .Values.chartBases.cortex }}"
   installed: {{ and .Values.enables.monitoring .Values.enables.minio .Values.enables.cortex }}
   skipDeps: true
   needs:
@@ -108,8 +127,6 @@ releases:
   values:
   - images:
       tag: v{{ .Values.versions.images.cortex }}
-    tags:
-      blocks-storage-memcached: true
     alertmanager:
       extraVolumes:
       - name: alertmanager-fallback
@@ -125,9 +142,66 @@ releases:
       - mountPath: /tmp
         name: tmp
     config:  # ref: https://github.com/cortexproject/cortex/blob/master/docs/configuration/config-file-reference.md
+      chunk_store:
+        chunk_cache_config:  # store.chunks-cache
+          redis:
+            <<: *grafanaRedis
+            db: 10
+        write_dedupe_cache_config:  # store.index-cache-write
+          redis:
+            <<: *grafanaRedis
+            db: 9
+      query_range:
+        cache_results: true
+        results_cache:
+          cache:  # frontend.cache
+            redis:
+              <<: *grafanaRedis
+              db: 11
       storage:
         engine: blocks
+        index_queries_cache_config:  # store.index-cache-read
+          redis:
+            <<: *grafanaRedis
+            db: 8
       blocks_storage:
+        bucket_store:
+          bucket_index:
+            enabled: true
+          sync_dir: /data/tsdb-sync
+          chunks_cache:
+            backend: memcached
+            memcached:
+              addresses: "dns+{{ .Values.releases.cortex }}-memcached-blocks.{{ .Values.namespaces.monitoring }}.svc:11211"
+              #host: "{{ .Values.releases.cortex }}-memcached-blocks.{{ .Values.namespaces.monitoring }}.svc:11211"
+{{/*
+            backend: redis
+            redis:
+              <<: *grafanaRedis
+              db: 5
+*/}}
+          index_cache:
+            backend: memcached
+            memcached:
+              addresses: "dns+{{ .Values.releases.cortex }}-memcached-blocks-index.{{ .Values.namespaces.monitoring }}.svc:11211"
+              #host: "{{ .Values.releases.cortex }}-memcached-blocks-index.{{ .Values.namespaces.monitoring }}.svc:11211"
+{{/*
+            backend: redis
+            redis:
+              <<: *grafanaRedis
+              db: 6
+*/}}
+          metadata_cache:
+            backend: memcached
+            memcached:
+              addresses: "dns+{{ .Values.releases.cortex }}-memcached-blocks-metadata.{{ .Values.namespaces.monitoring }}.svc:11211"
+              #host: "{{ .Values.releases.cortex }}-memcached-blocks-metadata.{{ .Values.namespaces.monitoring }}.svc:11211"
+{{/*
+            backend: redis
+            redis:
+              <<: *grafanaRedis
+              db: 7
+*/}}
         tsdb:
           dir: /data/tsdb
         backend: s3
@@ -140,8 +214,10 @@ releases:
           <<: *cortexBlockKvStore
       distributor:
         ha_tracker:
+          enable_ha_tracker: true
           kvstore:
-            store: etcd
+            <<: *cortexEtcdKvStore
+            prefix: "cortex/ha-tracker/"
         ring:
           <<: *cortexBlockKvStore
       ingester:
@@ -157,7 +233,7 @@ releases:
         enable_alertmanager_v2: true
         ring:
           kvstore:
-            <<: *etcdKvStore
+            <<: *cortexEtcdKvStore
             prefix: "cortex/rulers/"
       alertmanager:
         enable_api: true
@@ -165,7 +241,7 @@ releases:
         fallback_config_file: {{ .Values.cortex.fallbackConfig.mountPath }}/{{ .Values.cortex.fallbackConfig.subPath }}
         sharding_ring:
           kvstore:
-            <<: *etcdKvStore
+            <<: *cortexEtcdKvStore
             prefix: "cortex/alertmanagers/"
 {{- range (list "alertmanager" "ruler") }}
       {{ . }}_storage:
@@ -177,17 +253,163 @@ releases:
   -
 {{- range (list "alertmanager" "nginx" "distributor" "ingester" "ruler" "querier" "query_frontend" "table_manager" "configs" "store_gateway" "compactor") }}
     {{ . }}:
-      replicas: 3
+      #replicas: 3
       statefulSet:
         enabled: true
       #serviceMonitor:
       #  enabled: true
 {{- end }}
 
+- name: {{ .Values.releases.loki }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: grafana/loki-distributed
+  installed: {{ and .Values.enables.monitoring .Values.enables.minio }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  values:
+  - fullnameOverride: loki
+{{- range (list "distributor" "ingester" "querier" "queryFrontend" "gateway") }}
+    {{ . }}:
+      replicas: 1
+{{- end }}
+    tableManager:
+      enabled: true
+    compactor:
+      enabled: false
+    ruler:
+      enabled: true
+    loki:
+      # https://grafana.com/docs/loki/latest/configuration/
+      config: |
+        auth_enabled: false
+        storage_config:
+          aws:
+            #<<: *grafanaS3
+            endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+            access_key_id: {{ .Values.minio.accessKey | quote }}
+            secret_access_key: {{ .Values.minio.secretKey | quote }}
+            s3forcepathstyle: true
+            insecure: true
+            bucketnames: {{ .Values.loki.buckets.chunks | quote }}
+          cassandra:
+            addresses: {{ .Values.releases.cassandra }}-client.{{ .Values.namespaces.storage }}.svc
+            auth: true
+            keyspace: loki
+            consistency: LOCAL_QUORUM
+            replication_factor: 1
+          index_queries_cache_config:
+            redis:
+              #<<: *grafanaRedis
+              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              password: {{ .Values.redis.password | quote }}
+              db: 12
+        schema_config:
+          configs:
+          - from: 2020-09-07
+            store: cassandra
+            object_store: s3
+            schema: v11
+            index:
+              prefix: loki_index_
+              period: 24h
+            #chunks:
+            #  prefix: loki_chunk_
+            #  period: 24h
+        limits_config:
+          enforce_metric_name: false
+          ingestion_rate_mb: 128
+          reject_old_samples: true
+          reject_old_samples_max_age: 168h
+          max_cache_freshness_per_query: 10m
+        server:
+          http_listen_port: {{ .Values.loki.ports.http }}
+        distributor:
+          ring:
+            kvstore:
+              #<<: *etcdKvStore
+              store: etcd
+              etcd:
+                endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
+              prefix: "loki/collectors/"
+        ingester:
+          chunk_idle_period: 30m
+          chunk_block_size: 262144
+          chunk_encoding: snappy
+          chunk_retain_period: 1m
+          max_transfer_retries: 0
+          lifecycler:
+            final_sleep: 0s
+            ring:
+              replication_factor: 1
+              kvstore:
+                #<<: *etcdKvStore
+                store: etcd
+                etcd:
+                  endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
+                prefix: "loki/collectors/"
+        ruler:
+          enable_api: true
+          ring:
+            kvstore:
+              #<<: *etcdKvStore
+              store: etcd
+              etcd:
+                endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
+              prefix: "loki/rulers/"
+          storage:
+            type: s3
+            s3:
+              #<<: *grafanaS3
+              endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+              access_key_id: {{ .Values.minio.accessKey | quote }}
+              secret_access_key: {{ .Values.minio.secretKey | quote }}
+              s3forcepathstyle: true
+              insecure: true
+              bucketnames: {{ .Values.loki.buckets.notify | quote }}
+        chunk_store_config:
+          max_look_back_period: 0s
+          chunk_cache_config:
+            redis:
+              #<<: *grafanaRedis
+              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              password: {{ .Values.redis.password | quote }}
+              db: 14
+          write_dedupe_cache_config:
+            redis:
+              #<<: *grafanaRedis
+              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              password: {{ .Values.redis.password | quote }}
+              db: 15
+        table_manager:
+          retention_deletes_enabled: false
+          retention_period: 0s
+        query_range:
+          align_queries_with_step: true
+          max_retries: 5
+          split_queries_by_interval: 15m
+          cache_results: true
+          results_cache:
+            cache:
+              redis:
+                #<<: *grafanaRedis
+                endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+                password: {{ .Values.redis.password | quote }}
+                db: 13
+        frontend_worker:
+          frontend_address: "loki-query-frontend:{{ .Values.loki.ports.grpc }}"
+        frontend:
+          log_queries_longer_than: 5s
+          compress_responses: true
+          tail_proxy_url: "http://loki-querier:{{ .Values.loki.ports.http }}"
+
 # requires non-free timescale-licensed addon to timescaledb.so
 - name: {{ .Values.releases.promscale }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: timescale/promscale
+  #chart: timescale/promscale
+  chart: "{{ .Values.chartBases.promscale }}"
   installed: {{ and .Values.enables.storage .Values.enables.monitoring }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
@@ -205,7 +427,7 @@ releases:
 - name: {{ .Values.releases.kubePromStack }}
   namespace: {{ .Values.namespaces.monitoring }}
   chart: prometheus-community/kube-prometheus-stack
-  version: {{ .Values.kubePromStackChartVersion }}
+  {{/* version: {{ .Values.versions.charts.kubePromStack }} */}}
   installed: {{ .Values.enables.monitoring }}
   needs:
   - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.cortex }}
@@ -243,6 +465,7 @@ releases:
         secrets:  # mounted under /etc/prometheus/secrets/<secret_name>/<key>
         - {{ .Values.thanosSidecarMTLSSecret }}
         thanos:  # https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#thanosspec
+          image: "quay.io/thanos/thanos:v{{ .Values.versions.images.thanos }}"
           version: v{{ .Values.versions.images.thanos }}
           objectStorageConfig:
             key: {{ .Values.thanosObjstoreConfig.filename }}
@@ -272,6 +495,10 @@ releases:
         feature_toggles:
           enable: ngalert
       additionalDataSources:
+      - type: loki
+        name: Loki
+        access: proxy
+        url: "http://loki-query-frontend:{{ .Values.loki.ports.http }}"
       - type: prometheus
         access: proxy
         isDefault: true
@@ -300,7 +527,7 @@ releases:
   - {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
   values:
   - image:
-      repository: directxman12/k8s-prometheus-adapter
+      repository: k8s.gcr.io/prometheus-adapter/prometheus-adapter
       tag: v{{ .Values.versions.images.prometheusAdapter }}
     prometheus:
       url: "http://{{ .Values.releases.kubePromStack }}-prometheus.{{ .Values.namespaces.monitoring }}.svc"

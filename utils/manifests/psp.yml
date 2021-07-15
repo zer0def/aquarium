@@ -1,0 +1,135 @@
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: privileged-psp
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
+    container.seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
+spec:
+  privileged: true
+  allowPrivilegeEscalation: true
+  allowedCapabilities: ['*']
+  volumes: ['*']
+  hostNetwork: true
+  hostPorts:
+  - min: 0
+    max: 65535
+  hostIPC: true
+  hostPID: true
+  runAsUser:
+    rule: 'RunAsAny'
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'RunAsAny'
+  fsGroup:
+    rule: 'RunAsAny'
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: restricted-psp
+rules:
+- apiGroups: ['extensions', 'policy']
+  resources: ['podsecuritypolicies']
+  verbs: ['use']
+  resourceNames:
+  - privileged-psp
+  - restricted-psp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: privileged-psp
+roleRef:
+  kind: ClusterRole
+  name: privileged-psp
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: ServiceAccount
+  namespace: kube-system
+  name: default
+- kind: ServiceAccount
+  namespace: kube-system
+  name: coredns
+- kind: ServiceAccount
+  namespace: kube-system
+  name: kube-dns
+- kind: ServiceAccount
+  namespace: kube-system
+  name: local-path-provisioner-service-account
+#- kind: Group
+#  apiGroup: rbac.authorization.k8s.io
+#  name: system:serviceaccounts
+#- kind: Group
+#  apiGroup: rbac.authorization.k8s.io
+#  name: system:authenticated
+---
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: restricted-psp
+  annotations:
+    seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
+    container.seccomp.security.alpha.kubernetes.io/allowedProfileNames: '*'
+    #seccomp.security.alpha.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
+    #apparmor.security.beta.kubernetes.io/allowedProfileNames: 'docker/default,runtime/default'
+spec:
+  requiredDropCapabilities: ["ALL"]
+  forbiddenSysctls: ["*"]
+  volumes:
+  - configMap
+  - emptyDir
+  - projected
+  - secret
+  - downwardAPI
+  hostNetwork: false
+  hostPorts: []
+  hostIPC: false
+  hostPID: false
+  allowedHostPaths: []
+  readOnlyRootFilesystem: true
+  privileged: false
+  allowPrivilegeEscalation: false
+  defaultAllowPrivilegeEscalation: false
+  runAsUser:
+    rule: 'MustRunAsNonRoot'
+  seLinux:
+    rule: 'RunAsAny'
+  supplementalGroups:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1
+      max: 65535
+  fsGroup:
+    rule: 'MustRunAs'
+    ranges:
+    - min: 1
+      max: 65535
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: restricted-psp
+rules:
+- apiGroups: ['extensions', 'policy']
+  resources: ['podsecuritypolicies']
+  resourceNames: ['restricted-psp']
+  verbs: ['use']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: restricted-psp
+roleRef:
+  kind: ClusterRole
+  name: restricted-psp
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+- kind: Group
+  apiGroup: rbac.authorization.k8s.io
+  name: system:serviceaccounts
+- kind: Group
+  apiGroup: rbac.authorization.k8s.io
+  name: system:authenticated
