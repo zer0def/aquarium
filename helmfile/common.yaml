@@ -286,20 +286,17 @@ releases:
 - name: {{ .Values.releases.etcd }}
   namespace: {{ .Values.namespaces.storage }}
   chart: bitnami/etcd
-  version: {{ .Values.versions.charts.etcd }}
+  #version: {{ .Values.versions.charts.etcd }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
   values:
-  - statefulset:
-      replicaCount: {{ .Values.etcd.replicas }}
-      #podManagementPolicy: OrderedReady
+  - replicaCount: {{ .Values.etcd.replicas }}
+    #podManagementPolicy: OrderedReady
     autoCompactionMode: periodic
     autoCompactionRetention: 1
     extraEnvVars:
     - name: ETCD_QUOTA_BACKEND_BYTES
       value: "8589934592"
-    image:
-      tag: {{ .Values.versions.images.etcd }}
     auth:
       rbac:
         enabled: false

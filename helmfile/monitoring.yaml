@@ -16,6 +16,11 @@ repositories:
 - name: grafana  # https://github.com/grafana/helm-charts
   url: "https://grafana.github.io/helm-charts"
 
+{{- $s3 := dict "endpoint" (printf "%s.%s.svc:%s" .Values.releases.minio .Values.namespaces.storage (toString .Values.minio.servicePort)) "accessKey" .Values.minio.accessKey "secretKey" .Values.minio.secretKey }}
+{{- if eq .Values.s3Type "seaweedfs" }}
+  {{- $s3 = dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
+{{- end }}
+
 templates:
   cortex:
     values:
@@ -26,9 +31,9 @@ templates:
         tls_enabled: false
         tls_insecure_skip_verify: false
     - &cortexS3
-      endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
-      access_key_id: {{ .Values.minio.accessKey | quote }}
-      secret_access_key: {{ .Values.minio.secretKey | quote }}
+      endpoint: {{ $s3.endpoint | quote }}
+      access_key_id: {{ $s3.accessKey | quote }}
+      secret_access_key: {{ $s3.secretKey | quote }}
       insecure: true
       signature_version: v2
     - &cortexBlockKvStore
@@ -45,9 +50,9 @@ templates:
       etcd:
         endpoints: ["etcd.{{ .Values.namespaces.storage }}.svc:2379"]
     - &grafanaS3
-      endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
-      access_key_id: {{ .Values.minio.accessKey | quote }}
-      secret_access_key: {{ .Values.minio.secretKey | quote }}
+      endpoint: {{ $s3.endpoint | quote }}
+      access_key_id: {{ $s3.accessKey | quote }}
+      secret_access_key: {{ $s3.secretKey | quote }}
       s3forcepathstyle: true
       insecure: true
 
@@ -55,9 +60,10 @@ releases:
 - name: {{ .Values.releases.thanos }}
   namespace: {{ .Values.namespaces.monitoring }}
   chart: banzaicloud/thanos
-  installed: {{ and .Values.enables.monitoring .Values.enables.minio (not .Values.enables.cortex) }}
+  installed: {{ and .Values.enables.monitoring (not .Values.enables.cortex) }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - fullnameOverride: {{ .Values.releases.thanos | quote }}
     objstoreSecretOverride: {{ .Values.thanosObjstoreConfig.secret | quote }}
@@ -70,22 +76,58 @@ releases:
     objstore:
       type: S3
       config:
-        bucket: {{ .Values.minio.defaultBucket | quote }}
-        endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
-        access_key: {{ .Values.minio.accessKey | quote }}
-        secret_key: {{ .Values.minio.secretKey | quote }}
+        bucket: {{ .Values.thanosObjstoreConfig.bucket | quote }}
+        endpoint: {{ $s3.endpoint | quote }}
+        access_key: {{ $s3.accessKey | quote }}
+        secret_key: {{ $s3.secretKey | quote }}
         insecure: true
         signature_version2: true
     query:
       replicaLabels:
       - prometheus_replica  # server-scoped
       #- prometheus  # cluster-scoped
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: {{ .Values.thanosObjstoreConfig.secret }}
+        namespace: {{ .Values.namespaces.monitoring }}
+      stringData:
+        # ref: https://github.com/thanos-io/thanos/blob/master/docs/storage.md
+        {{ .Values.thanosObjstoreConfig.filename }}: |
+          type: S3
+          config:
+            bucket: {{ .Values.thanosObjstoreConfig.bucket | quote }}
+            endpoint: {{ $s3.endpoint | quote }}
+            access_key: {{ $s3.accessKey | quote }}
+            secret_key: {{ $s3.secretKey | quote }}
+            insecure: true
+            signature_version2: true
+      ---
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: {{ .Values.thanosSidecarMTLSSecret }}
+        namespace: {{ .Values.namespaces.monitoring }}
+      type: kubernetes.io/tls
+      data:
+        ca.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURTekNDQWpPZ0F3SUJBZ0lVQ01ORUNtOVdrWnNZcWl2YTZYVHZyQ3F5enA4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd0ZqRVVNQklHQTFVRUF3d0xSV0Z6ZVMxU1UwRWdRMEV3SGhjTk1qQXdPVEUwTVRNek9EUTRXaGNOTXpBdwpPVEV5TVRNek9EUTRXakFXTVJRd0VnWURWUVFEREF0RllYTjVMVkpUUVNCRFFUQ0NBU0l3RFFZSktvWklodmNOCkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFMdGdnRTRxeTZNS2dLaEJrQXN2Nnp0V0JVbUhLUHNYZWlXci9NUkcKUU9vTzZUamVYbWl5alFtYy9hNmJhUjFueWF0RDF6TWFQcDZlbFhUMEw4K0k2UG9BcWJSRzlhMHpnMFY5NGlKbQp3Z1hLZlFETTlxYit6SGwxZ212dEMzK3pkQzFrWUJMZ0NsdWhERkxTT1p3aVhCS2RuUXZGcE9DUVlQcjg2cCtlCisvMzdaWjU1MVQ5Y3RtSmMzbkVrZy8wRUwwbHkxQ0diS2daL2ZhR2JUUXRkYko3QjRlYXpWNDVodWQ0MzVCTEwKWkptb2tMcmpURWJkQ1BvV2ZsbVN0LzIzZ0daS1F6T3dWbFNwY284S0xyTWhTbHRKL1VabTN4dzF1NHBBWHpEcQpjVnJwekR0RnluUjhJQmdWU1RIcnpLNStXK1kwUUpxeVRSbDJsWkpWWGtxVTVEOENBd0VBQWFPQmtEQ0JqVEFkCkJnTlZIUTRFRmdRVXZLdk1JVnBVeXhsZ0ZrS0tpZWo2TWQ3SG1JRXdVUVlEVlIwakJFb3dTSUFVdkt2TUlWcFUKeXhsZ0ZrS0tpZWo2TWQ3SG1JR2hHcVFZTUJZeEZEQVNCZ05WQkFNTUMwVmhjM2t0VWxOQklFTkJnaFFJdzBRSwpiMWFSbXhpcUs5cnBkTytzS3JMT256QU1CZ05WSFJNRUJUQURBUUgvTUFzR0ExVWREd1FFQXdJQkJqQU5CZ2txCmhraUc5dzBCQVFzRkFBT0NBUUVBQk52TkJQTGdQM2xOaWovQXM3eHlXNGplbCs3MjZVNWNhdllEOWIvM2EyU1EKY0c2UThOYU5WeVlOaGZyWDh2UENlTlJsVisyeGRKM2xvbHlGVGpMbGVIVStsR0lvcTh0OHFvRHBYN3BQQ2F4RgpxaFk4WHNZRm9PcVNlZTJEMGVKY0RqZUZuZWtObmpWYkU1NE8yQkhmaDl4c1RBajBGQytYYmR6dFJzS3JzaTBMClM0V2lDeXVhRlFRcXhFa3FsQ3pTeS9vM25jam1PNlRwcFZuTU1FL2pEZ2MyVUV6Y3lZZzRXTk1EZHRPbWNMYkkKeE52bG9YQnRadFhxT0Z2UC9vUGs4aXJ0NkRSUVdLSDB3SnRtcm1RYVpSMTRsVVRnTmQ1WGxIZ1JUY3FzS25wOQpGaG03aUFrTzJ2WENod2NscHFSZExJaWxxcWNxMDJ5bW80S1JqTkNGUmc9PQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+        tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURaekNDQWsrZ0F3SUJBZ0lRWlJ2eW85cm45SGhHcmUxUlNFTS9SREFOQmdrcWhraUc5dzBCQVFzRkFEQVcKTVJRd0VnWURWUVFEREF0RllYTjVMVkpUUVNCRFFUQWVGdzB5TURBNU1UUXhNelF5TXpsYUZ3MHlNakV5TVRneApNelF5TXpsYU1CRXhEekFOQmdOVkJBTU1CblJvWVc1dmN6Q0NBU0l3RFFZSktvWklodmNOQVFFQkJRQURnZ0VQCkFEQ0NBUW9DZ2dFQkFMWUtGUGwvdG5GUFNxSzNpSk1abmx5czU5dzRDZ2xJSmhtWDdobnBXdjR3N2pWZFE3WDcKc3BrY0dpejYxTGE0emJQYk05dVpFcE5HejNhZHl1TmZnRk4ycDUrZmRjUTY4QURwc1gxNUlUOVp6blUzbWs4Tgo4Skl0ZWlISi90M0V2QTNEWHFpWE5NVEdOSWdML0NQb1NtNDNOTnlKb0RpOU50dlcvZUlyVDA4U1NYQkM1TDhpClhnVVl4WFZuTHpVbUU0SThPU2ZucjJNeVZ1eUFOWE5nY3dndkxISDF5WlV4UkN5ZWNmQWlMNnFZTmZQUjVTTVQKdm55VmtXalRvcEZyYkFkeWpnWDNlSStZT21IVHc1USs4WGhHZEVjTEUzSTNxbjc4QjlkOGdyb0tvdjZZMWVHRAplSGJnQzZhNzJMaHVVWTBnSDVadDhWOFlXd3RDNnR5U1Q3TUNBd0VBQWFPQnRUQ0JzakFKQmdOVkhSTUVBakFBCk1CMEdBMVVkRGdRV0JCUXlHTUJHM2tMVVJIZ21PTWhKZVBBOUU1VUx1akJSQmdOVkhTTUVTakJJZ0JTOHE4d2gKV2xUTEdXQVdRb3FKNlBveDNzZVlnYUVhcEJnd0ZqRVVNQklHQTFVRUF3d0xSV0Z6ZVMxU1UwRWdRMEdDRkFqRApSQXB2VnBHYkdLb3IydWwwNzZ3cXNzNmZNQk1HQTFVZEpRUU1NQW9HQ0NzR0FRVUZCd01CTUFzR0ExVWREd1FFCkF3SUZvREFSQmdOVkhSRUVDakFJZ2daMGFHRnViM013RFFZSktvWklodmNOQVFFTEJRQURnZ0VCQUxpNXVQa0kKUzNHRldSVkF1U25DUnE5T2FYYWh1WTY4RU9xYXlobnc1dG5ZRWdCRHVxcVFhaVVNUU9MSUtXdVJDNzlGYzFyQQp1c3FlU2RrcjVKMkRaL21SeTBtSDRXN1ptd2phcXpyekJoVmF2WFpZVEJZQ2xiUWlXdUhXUGEzWTY4WFYyNVd1ClYzNzVMR2QybmkzaXhXaUlOZ055NG0xTzByN0lMOW9xVnRwQ3REazZYRFRzU3cxTjlicW9jOS9PQ3U3NFJtT08KUWQ0Q3pXbWViYlFheGhqdFJNUkZyd0haV3dmYWRKVEZTSEpDcUNUMHlYdVQ1ZHZqdjI2YzQ3TkJPWWlSL1ZNcQoyRGJNU3FuN2ZHVzQwUjRTeWhNOE8rdk9WQ2lvOUFwNUpVYzhNOWMxbWwyZTlpSnNQR2h0bjh3UW85Tk5GVU5aCkFZVjFvdDZTRFdKU2ZHcz0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
+        tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRQzJDaFQ1ZjdaeFQwcWkKdDRpVEdaNWNyT2ZjT0FvSlNDWVpsKzRaNlZyK01PNDFYVU8xKzdLWkhCb3MrdFMydU0yejJ6UGJtUktUUnM5MgpuY3JqWDRCVGRxZWZuM1hFT3ZBQTZiRjllU0UvV2M1MU41cFBEZkNTTFhvaHlmN2R4THdOdzE2b2x6VEV4alNJCkMvd2o2RXB1TnpUY2lhQTR2VGJiMXYzaUswOVBFa2x3UXVTL0lsNEZHTVYxWnk4MUpoT0NQRGtuNTY5ak1sYnMKZ0RWellITUlMeXh4OWNtVk1VUXNubkh3SWkrcW1EWHowZVVqRTc1OGxaRm8wNktSYTJ3SGNvNEY5M2lQbURwaAowOE9VUHZGNFJuUkhDeE55TjZwKy9BZlhmSUs2Q3FMK21OWGhnM2gyNEF1bXU5aTRibEdOSUIrV2JmRmZHRnNMClF1cmNrayt6QWdNQkFBRUNnZ0VBUlhkcGM2Qnh6YUdWZUt5UytKZHhJQ3AzUEVsQ1F6SitINHdqdDAyZWhKdkYKZXlYQS9nUXpya3ZVRFZBV3RqZWxmN25wZXlaWnVVdnZSWE9IaGViZXdIcnFFbmEyYVJDWW43Q09JN1NDcEhzdgoxdmxGOEY4QWE3ZmhBRjNsM1ZrQzdqbWN1TGNpMHVoVUNZcVJTRjZQY0ttdWlXNFhieTk5YkwwSkd6S3R6QjBvCmxSMGphNHY2L0xWMVppam5Zc0hnYThQL1V5MzVKN2VuZ0VBc3I3U1huZ1NHYTg4RUY1V1l6K25oY01nYnN3cG8KYmlKQmZmTkdiMnJlSHFUVTBKS2pYak8xcFJsc1ZDNjRmT2VvcVlBdTVEbExUUnZHNmVnRGxkdmFBdFZsRGdwSApTOXFQQVdRV0IyajhQVy9tWmQ5ZEZpWDNPSkNlZEZ4aCtsZDlLQkNSUVFLQmdRRGF4WER4eHZBNGFvbzhoSUkvCkdlc2NQUFcwemVidGpZU1FZVHdUUWxNR3NTd1p1aUxENGNReks1MCtMVk1lZGdINVpFTVUvL0oySitTaUJUbGIKak5sOWMyZE5HTzdrWUdmMkdiS3kvVDYxMHBDWlVaNXJPR3ZNSXBrZGZBT28wRU1NNm9Bb01xRCtxS2NEajYvOAptN1VheVZIZjBTbkNCV1BFV0hIemF0OW8wd0tCZ1FEVkJITy93cTBrRjRtaGNMNGxuWFE4ZTJQOGhpdHJML3hMCnpTUGhLL2p0UXBHUmdHdS94VDJMbnBpTmZ2ZVpISWZKemw4QXh6Q1hsV0d1R0x3WDc5amNKNUdsMDhVRHlPQkYKOXQ4dGxuTWhzYTlaa1VyQkZURXBnY2tRb2xWOFk4aHBkUUZNMW4rTzJLbm1ta3VBTEFUY1Y1NFZYY2RpTkdLdgpONkN2NEZzeG9RS0JnSHAyZDhrQUFjeXk1dnNGZWh0MG1NWFA0Z0w2RjhEMnJUUmRHZEgyR0ovd1lhMXRJclRnCkZvSkdjZGt5YWdydEtDSEEzRVJQR2h6R0xCZitNS05zN3Zwb3RYVFU5alZsT2d6clNic2tSQXhuK0lXNnlLRmcKamdkUmZzQ2dnVFBva1FBVDdQV1RrY2U4QlBIYlp6cFN0MGh0VmFXaVltdTN0S2Rla3pzZG9qMzlBb0dCQUtjRgptS1JReG1VNE4yZm4rSStSeDZQc3M5YzZkQ3pWTVNOV003M0lOcVFCd0JXdjljd2xvVDRxR2o5SHdHZkRJUTB3CnpQalZOZHFFL0ZQL2ZPdmYyYysxRHRSUkdYY0FPQ2xqaWxZNlV3ZW1SSEVjSk5zRC9Nb293emhSc0dtWjYzZ1UKai9KcGRSYlI5MVdpd1hROEQ0dWMvNHlOUFZwWTdNK3A5RW95eGc1QkFvR0JBSUpweWpGOXRsc3JESXJ0WGZIRApESFdsNG03SjNVZ25UL3ovWW4xdnBjY0tlUWlzUnVjRXZldVJOeUo4TCtBaEJIbWcyc1A0SVJ0c1IvR0lKVWVrCjYrQkJSbFh2dFJYWTRhSkE5OGhXMHRhdVV2UEYyNGxycExFdXhxaERiWVR6UnFuQXNtZFM5NnM0dndKakQzSXMKNVVQYWVoS2VJcnVOMFNGaUhOallBQkNPCi0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+      EOF
 
 {{- range (list "" "-index" "-metadata") }}
 - name: {{ $.Values.releases.cortex }}-memcached-blocks{{ . }}
   namespace: {{ $.Values.namespaces.monitoring }}
   chart: bitnami/memcached
-  installed: {{ and $.Values.enables.monitoring $.Values.enables.minio $.Values.enables.cortex }}
+  installed: {{ and $.Values.enables.monitoring $.Values.enables.cortex }}
   version: {{ $.Values.versions.charts.memcached }}
   needs:
   - {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
@@ -99,10 +141,11 @@ releases:
 - name: {{ .Values.releases.cortex }}
   namespace: {{ .Values.namespaces.monitoring }}
   chart: "{{ .Values.chartBases.cortex }}"
-  installed: {{ and .Values.enables.monitoring .Values.enables.minio .Values.enables.cortex }}
+  installed: {{ and .Values.enables.monitoring .Values.enables.cortex }}
   skipDeps: true
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- if .Values.enables.cortex }}
   hooks:
   - events: ["presync"]
@@ -263,12 +306,13 @@ releases:
 - name: {{ .Values.releases.loki }}
   namespace: {{ .Values.namespaces.monitoring }}
   chart: grafana/loki-distributed
-  installed: {{ and .Values.enables.monitoring .Values.enables.minio }}
+  installed: {{ .Values.enables.monitoring }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - fullnameOverride: loki
 {{- range (list "distributor" "ingester" "querier" "queryFrontend" "gateway") }}
@@ -288,9 +332,9 @@ releases:
         storage_config:
           aws:
             #<<: *grafanaS3
-            endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
-            access_key_id: {{ .Values.minio.accessKey | quote }}
-            secret_access_key: {{ .Values.minio.secretKey | quote }}
+            endpoint: {{ $s3.endpoint | quote }}
+            access_key_id: {{ $s3.accessKey | quote }}
+            secret_access_key: {{ $s3.secretKey | quote }}
             s3forcepathstyle: true
             insecure: true
             bucketnames: {{ .Values.loki.buckets.chunks | quote }}
@@ -363,9 +407,9 @@ releases:
             type: s3
             s3:
               #<<: *grafanaS3
-              endpoint: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
-              access_key_id: {{ .Values.minio.accessKey | quote }}
-              secret_access_key: {{ .Values.minio.secretKey | quote }}
+              endpoint: {{ $s3.endpoint | quote }}
+              access_key_id: {{ $s3.accessKey | quote }}
+              secret_access_key: {{ $s3.secretKey | quote }}
               s3forcepathstyle: true
               insecure: true
               bucketnames: {{ .Values.loki.buckets.notify | quote }}

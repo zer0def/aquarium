@@ -14,7 +14,7 @@ repositories:
   url: "https://charts.rook.io/release"
 
 releases:
-# https://rook.io/docs/rook/master/helm-operator.html
+# https://rook.io/docs/rook/latest/helm-operator.html
 - name: rook-operator
   namespace: {{ .Values.rook.namespace }}
   chart: rook/rook-ceph
@@ -66,7 +66,7 @@ releases:
       spec:
         dataDirHostPath: /var/lib/rook
         cephVersion:
-          image: ceph/ceph:v{{ default "16.2.4" (env "CEPH_VERSION") }}
+          image: ceph/ceph:v{{ default "16.2.5" (env "CEPH_VERSION") }}
           allowUnsupported: true
         mon:
           count: {{ default 3 (env "CEPH_MON_COUNT") }}
@@ -154,7 +154,7 @@ releases:
             dnsPolicy: ClusterFirstWithHostNet
             containers:
             - name: rook-ceph-tools
-              image: rook/ceph:master
+              image: rook/ceph:{{ .Values.versions.charts.rook }}
               command: ["/tini"]
               args: ["-g", "--", "/usr/local/bin/toolbox.sh"]
               imagePullPolicy: IfNotPresent

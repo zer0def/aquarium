@@ -24,12 +24,18 @@ templates:
         image:
           tag: v{{ .Values.versions.images.harbor }}
 
+{{- $s3 := dict "endpoint" (printf "%s.%s.svc:%s" .Values.releases.minio .Values.namespaces.storage (toString .Values.minio.servicePort)) "accessKey" .Values.minio.accessKey "secretKey" .Values.minio.secretKey }}
+{{- if eq .Values.s3Type "seaweedfs" }}
+  {{- $s3 = dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
+{{- end }}
+
 releases:
+{{/*
 - name: {{ .Values.releases.minio }}
   namespace: {{ .Values.namespaces.storage }}
   chart: minio/minio
   version: {{ .Values.versions.charts.minio }}
-  installed: {{ and .Values.enables.storage .Values.enables.minio }}
+  installed: {{ and .Values.enables.storage (eq .Values.s3Type "minio") }}
 {{- if ne .Values.k8sRuntime "k3d" }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
@@ -51,7 +57,10 @@ releases:
     extraArgs:
     - --console-address=:31337
     buckets:
-    - name: {{ .Values.minio.defaultBucket | quote }}
+    - name: {{ .Values.thanosObjstoreConfig.bucket | quote }}
+      policy: none
+      purge: false
+    - name: {{ .Values.harbor.bucket | quote }}
       policy: none
       purge: false
     - name: {{ .Values.sentry.bucket | quote }}
@@ -79,7 +88,7 @@ releases:
         memory: 256Mi
     mode: distributed
     replicas: {{ .Values.minio.replicas }}
-{{- if and .Values.enables.storage .Values.enables.minio }}
+{{- if and .Values.enables.storage (eq .Values.s3Type "minio") }}
   hooks:
   - events: ["postsync"]
     command: "/bin/sh"
@@ -110,15 +119,14 @@ releases:
               command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
       EOF
       until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc "mc config host add {{ .Values.minio.host }} http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }} {{ .Values.minio.accessKey }} {{ .Values.minio.secretKey }}"
-      echo "MinIO is available under http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }} with access key \"{{ .Values.minio.accessKey }}\", secret key \"{{ .Values.minio.secretKey }}\" and default bucket \"{{ .Values.minio.defaultBucket }}\"."
+      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add {{ .Values.s3Type }} http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}'
+      echo "MinIO is available under http://{{ $s3.endpoint }} with access key \"{{ $s3.accessKey }}\" and secret key \"{{ $s3.secretKey }}\"."
 {{- end }}
 
 - name: minio-operator
   namespace: {{ .Values.namespaces.storage }}
   chart: "{{ .Values.chartBases.minioOperator }}/minio-operator"
-  installed: false
-  #installed: {{ and .Values.enables.storage .Values.enables.minio }}
+  installed: {{ and .Values.enables.storage (eq .Values.s3Type "minio-operator") }}
 {{- if ne .Values.k8sRuntime "k3d" }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
@@ -139,10 +147,165 @@ releases:
       secrets:
         enabled: true
         name: mini0-keys
-        accessKey: {{ .Values.minio.accessKey | quote }}
-        secretKey: {{ .Values.minio.secretKey | quote }}
+        accessKey: {{ $s3.accessKey | quote }}
+        secretKey: {{ $s3.secretKey | quote }}
       metrics:
         enabled: true
+*/}}
+
+- name: {{ .Values.releases.seaweedfs }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: {{ .Values.chartBases.seaweedfs | quote }}
+  installed: {{ .Values.enables.storage }}
+  needs:
+{{- if ne .Values.k8sRuntime "k3d" }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  #- {{ .Values.namespaces.monitoring }}/{{ .Values.releases.kubePromStack }}
+  values:
+  - global:
+      # https://github.com/chrislusf/seaweedfs/wiki/Replication#the-meaning-of-replication-type
+      enableReplication: true
+      replicationPlacment: "001"
+      #enableSecurity: true
+    master:
+      enabled: true
+      replicas: 3
+      affinity: ""
+      nodeSelector: ""
+      port: {{ .Values.seaweedfs.ports.http.master }}
+      grpcPort: {{ .Values.seaweedfs.ports.grpc.master }}
+      defaultReplication: "001"
+      #storage: 25Gi
+      #storageClass: null
+      extraEnvironmentVars:
+        WEED_MASTER_REPLICATION_TREAT_REPLICATION_AS_MINIMUMS: "true"
+    cronjob:
+      nodeSelector: ""
+    volume:
+      enabled: true
+      replicas: 3
+      affinity: ""
+      nodeSelector: ""
+      port: {{ .Values.seaweedfs.ports.http.volume }}
+      grpcPort: {{ .Values.seaweedfs.ports.grpc.volume }}
+      fileSizeLimitMB: "1048576"  # 1TiB, if you have a file that big, welp…
+      minFreeSpacePercent: 0
+      compactionMBps: "1048576" # 1TiB/s
+      index: leveldbLarge
+      metricsPort: 0
+      dataCenter: dc0
+      rack: r0
+      dir: /data
+      dir_idx: /idx
+      maxVolumes: 256
+      data:
+        type: persistentVolumeClaim
+        size: 8Ti
+      idx:
+        type: persistentVolumeClaim
+        size: 8Ti
+      logs:
+        type: persistentVolumeClaim
+        size: 8Ti
+    filer:
+      enabled: true
+      replicas: 3
+      affinity: ""
+      nodeSelector: ""
+      port: {{ .Values.seaweedfs.ports.http.filer }}
+      grpcPort: {{ .Values.seaweedfs.ports.grpc.filer }}
+      metricsPort: 0
+      defaultReplicaPlacement: "001"
+      s3:
+        allowEmptyFolder: true
+        enableAuth: true
+        port: {{ .Values.seaweedfs.ports.http.s3 }}
+      #  skipAuthSecretCreation: true
+      #  enabled: false
+      #  domainName: ""
+        keys:
+          admin:
+            accessKey: {{ .Values.seaweedfs.s3.keys.admin.accessKey | quote }}
+            secretKey: {{ .Values.seaweedfs.s3.keys.admin.secretKey | quote }}
+      extraEnvironmentVars:
+{{- if .Values.seaweedfs.filerIndex.redis.enabled }}
+        #WEED_REDIS_CLUSTER_ENABLED: "true"
+        #WEED_REDIS_CLUSTER_ADDRESSES: '["{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"]'
+        #WEED_REDIS_CLUSTER_PASSWORD: {{ .Values.redis.password | quote }}
+        #WEED_REDIS_CLUSTER_DATABASE: {{ .Values.seaweedfs.filerIndex.redis.db | quote }}
+        #WEED_REDIS_CLUSTER2_SUPERLARGEDIRECTORIES: '["/"]'
+        WEED_REDIS_ENABLED: "true"
+        WEED_REDIS_ADDRESS: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+        WEED_REDIS_PASSWORD: {{ .Values.redis.password | quote }}
+        WEED_REDIS_DATABASE: {{ .Values.seaweedfs.filerIndex.redis.db | quote }}
+        #WEED_REDIS2_SUPERLARGEDIRECTORIES: '["/"]'
+{{- else if .Values.seaweedfs.filerIndex.postgresql.enabled }}
+        WEED_POSTGRES_ENABLED: "true"
+        WEED_POSTGRES_SSLMODE: "prefer"
+        WEED_POSTGRES_HOSTNAME: "{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc"
+        WEED_POSTGRES_USERNAME: {{ .Values.seaweedfs.filerIndex.postgresql.user | quote }}
+        WEED_POSTGRES_PASSWORD: {{ .Values.seaweedfs.filerIndex.postgresql.pass | quote }}
+        WEED_POSTGRES_DATABASE: {{ .Values.seaweedfs.filerIndex.postgresql.name | quote }}
+        WEED_POSTGRES_CONNECTION_MAX_IDLE: "5"
+        WEED_POSTGRES_CONNECTION_MAX_OPEN: "75"
+        WEED_POSTGRES_CONNECTION_MAX_LIFETIME_SECONDS: "600"
+{{- else }}
+        WHATEVER: smirk
+{{- end }}
+    s3:
+    #  enabled: true
+      replicas: 3
+      nodeSelector: ""
+      port: {{ .Values.seaweedfs.ports.http.s3 }}
+      metricsPort: 0
+      allowEmptyFolder: true
+      enableAuth: true
+    #  skipAuthSecretCreation: true
+    #  domainName: ""
+      logs:
+        type: persistentVolumeClaim
+        size: 8Ti
+      keys:
+        admin:
+          accessKey: {{ .Values.seaweedfs.s3.keys.admin.accessKey | quote }}
+          secretKey: {{ .Values.seaweedfs.s3.keys.admin.secretKey | quote }}
+{{- if and .Values.enables.storage (eq .Values.s3Type "seaweedfs") }}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      MC_NAME="mc-${RANDOM}"
+      kubectl -n {{ .Values.namespaces.storage }} apply -f- <<EOF
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ${MC_NAME}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: minio-client
+            release: ${MC_NAME}
+        template:
+          metadata:
+            labels:
+              app: minio-client
+              release: ${MC_NAME}
+          spec:
+            containers:
+            - name: mc
+              image: minio/mc
+              command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
+      EOF
+      until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
+      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add {{ .Values.s3Type }} http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}; for i in {{ .Values.thanosObjstoreConfig.bucket | quote }} {{ .Values.harbor.bucket | quote }} {{ .Values.sentry.bucket | quote }} {{ .Values.cortex.buckets.blocks | quote }} {{ .Values.cortex.buckets.notify | quote }} {{ .Values.loki.buckets.chunks | quote }} {{ .Values.loki.buckets.notify | quote }} {{ .Values.patroni.walBucket | quote }}; do mc ls "{{ .Values.s3Type }}/${i}" || mc mb "{{ .Values.s3Type }}/${i}"; done'
+      echo "MinIO is available under http://{{ $s3.endpoint }} with access key \"{{ $s3.accessKey }}\" and secret key \"{{ $s3.secretKey }}\"."
+{{- end }}
 
 {{- $patroniHashedName := printf "%s-%s" .Values.releases.patroni (printf "%s:%s" .Values.patroni.image .Values.patroni.tag | sha256sum | trunc 8) }}
 - name: {{ .Values.releases.patroni }}
@@ -156,6 +319,7 @@ releases:
 {{- end }}
 {{- if index .Values.patroni "walBucket" }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- end }}
 {{- if ne .Values.k8sRuntime "k3d" }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
@@ -195,10 +359,10 @@ releases:
     env:
       ALLOW_NOSSL: "true"
 {{- if index .Values.patroni "walBucket" }}
-      AWS_ENDPOINT: "http://{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+      AWS_ENDPOINT: "http://{{ $s3.endpoint }}"
       AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: {{ .Values.minio.accessKey | quote }}
-      AWS_SECRET_ACCESS_KEY: {{ .Values.minio.secretKey | quote }}
+      AWS_ACCESS_KEY_ID: {{ $s3.accessKey | quote }}
+      AWS_SECRET_ACCESS_KEY: {{ $s3.secretKey | quote }}
       AWS_S3_FORCE_PATH_STYLE: "true"
       USE_WALG_BACKUP: "true"
       USE_WALG_RESTORE: "true"
@@ -273,6 +437,11 @@ releases:
     - name: {{ .Values.anchore.db.name | quote }}
       user: {{ .Values.anchore.db.user | quote }}
       pass: {{ .Values.anchore.db.pass | quote }}
+{{- if .Values.seaweedfs.filerIndex.postgresql.enabled }}
+    - name: {{ .Values.seaweedfs.postgresql.name | quote }}
+      user: {{ .Values.seaweedfs.postgresql.user | quote }}
+      pass: {{ .Values.seaweedfs.postgresql.pass | quote }}
+{{- end }}
 
 - name: {{ .Values.releases.cassandra }}-operator
   namespace: {{ .Values.namespaces.storage }}
@@ -377,7 +546,7 @@ releases:
     hardAntiAffinity: false
     replicas: {{ .Values.redis.replicas.redis }}
     image:
-      tag: alpine
+      tag: {{ .Values.versions.images.redis }}
     haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
       enabled: true
       replicas: {{ .Values.redis.replicas.haproxy }}
@@ -389,9 +558,11 @@ releases:
       metrics:
         enabled: true
       image:
-        tag: lts-alpine
+        tag: {{ .Values.versions.images.redisHaproxy }}
     redis:
       port: {{ .Values.redis.ports.readwrite }}
+      config:
+        databases: {{ .Values.redis.databaseCount }}
     sentinel:
       port: {{ .Values.redis.ports.sentinel }}
     exporter:
@@ -438,12 +609,12 @@ releases:
   namespace: {{ .Values.namespaces.storage }}
   chart: harbor/harbor
   version: {{ .Values.versions.charts.harbor }}
-  installed: {{ and .Values.enables.storage .Values.enables.minio }}
-  #installed: false
+  installed: {{ .Values.enables.storage }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- if .Values.enables.anchore }}
   hooks:
   - events: ["postsync"]
@@ -536,12 +707,12 @@ releases:
         disableredirect: true
         type: s3
         s3:
-          accesskey: {{ .Values.minio.accessKey | quote }}
-          secretkey: {{ .Values.minio.secretKey | quote }}
-          bucket: {{ .Values.minio.defaultBucket | quote }}
+          accesskey: {{ $s3.accessKey | quote }}
+          secretkey: {{ $s3.secretKey | quote }}
+          bucket: {{ .Values.harbor.bucket | quote }}
           # if using insecure object storage endpoints, you need to prefix it with `http://` protocol for chartmuseum to not barf
           secure: false
-          regionendpoint: "http://minio.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+          regionendpoint: {{ $s3.endpoint | quote }}
     database:
       type: external
       external:
@@ -702,10 +873,10 @@ releases:
       backend: s3
       s3:
         signature_version: v2
-        accessKey: {{ .Values.minio.accessKey | quote }}
-        secretKey: {{ .Values.minio.secretKey | quote }}
+        accessKey: {{ $s3.accessKey | quote }}
+        secretKey: {{ $s3.secretKey | quote }}
         bucketName: {{ .Values.sentry.bucket | quote }}
-        endpointUrl: "{{ .Values.releases.minio }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.minio.servicePort }}"
+        endpointUrl: {{ $s3.endpoint | quote }}
     snuba:
 {{- range (list "api" "dbInitJob" "migrateJob" "consumer" "replacer" "outcomesConsumer" "sessionsConsumer" "transactionsConsumer" "cleanupErrors" "cleanupTransactions") }}
       {{ . }}:
@@ -723,3 +894,24 @@ releases:
 {{- range $i, $v := until .Values.kafka.replicas }}
       until kubectl -n {{ $.Values.namespaces.storage }} wait --for condition=ready pod {{ $.Values.releases.kafka }}-{{ $i }}; do sleep 1; done 2>/dev/null
 {{- end }}
+
+- name: swift
+  namespace: {{ .Values.namespaces.storage }}
+  #installed: {{ .Values.enables.storage }}
+  installed: false
+  chart: "{{ .Values.chartBases.swift }}/swift"
+{{- if ne .Values.k8sRuntime "k3d" }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - debug: true
+    alerts:
+      enabled: false
+    image:
+      repository: zer0def/docker-swift
+      tag: latest
+    haproxy:
+      image:
+        repository: haproxy
+        tag: lts-alpine

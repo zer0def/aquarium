@@ -11,7 +11,8 @@ helmDefaults:
 
 repositories:
 - name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
-  url: "https://helm.nginx.com/stable"
+  url: "https://helm.nginx.com/edge"
+  #url: "https://helm.nginx.com/stable"
 - name: jetstack  # cert-manager
   url: "https://charts.jetstack.io"
 - name: openebs
@@ -200,4 +201,5 @@ releases:
       setAsDefaultIngress: true
       #watchNamespace: {{ .Values.openstack.namespace }}
   chart: nginx/nginx-ingress
+  version: 0.0.0-edge
   #chart: kubernetes-nginx/ingress-nginx

@@ -93,7 +93,7 @@ Logical components are split into namespaces according to the following logic:
 
 - storage:
     - [OpenEBS](https://github.com/openebs/openebs) in local volume provisioner mode
-    - [MinIO](https://github.com/minio/minio) for object storage
+    - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage
     - [Patroni](https://github.com/zalando/patroni)/[Spilo](https://github.com/zalando/spilo) for PostgreSQL deployment
     - Redis
     - [Harbor](https://github.com/goharbor/harbor) for cluster-local registry

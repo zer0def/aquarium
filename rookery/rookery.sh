@@ -36,12 +36,14 @@ EOF
 declare -A STABLE_VERSION_REQUIREMENTS=(
   ['victoria']='neutron-lib<2.7.0'
   ['wallaby']='eventlet<0.30.3 zstd<1.5 flask<2.0 typing-extensions<3.10 XStatic-Angular<1.8.2.1'
+  ['xena']='eventlet<0.30.3 typing-extensions<3.10 XStatic-Angular<1.8.2.1'  # typing-extensions only for bionic?
 )
 
 OS_PROFILES=(infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt)
 OS_PIP_ARGS=("--use-feature=in-tree-build")
 OS_PIP_PKGS=(
-  "psycopg2-binary" "uwsgi"
+  "psycopg2-binary<2.9"  # https://github.com/psycopg/psycopg2/issues/1293
+  "uwsgi"
   #"psycopg2cffi" "psycogreen" "pg8000<=1.16.5"
 )
 
@@ -229,11 +231,11 @@ main(){
   : ${CLUSTER_NAME:=rookery}
   : ${NUM_WORKERS:=1}
   : ${K8S_VERSION:=1.22.2}
-  : ${OS_VERSION:=wallaby}
+  : ${OS_VERSION:=xena}
   : ${BASE_IMAGE:=ubuntu_bionic}
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
   : ${WORKER_MEMORY_SIZE:=12GiB}
-  : ${CEPH_VERSION:=16.2.4}
+  : ${CEPH_VERSION:=16.2.5}
   #NUM_VOLUMES="${NUM_VOLUMES:-2}"
 
   local SCRIPT_OP

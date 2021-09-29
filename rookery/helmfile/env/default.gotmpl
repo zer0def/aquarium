@@ -141,7 +141,7 @@ versions:
     mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
     memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
     openebs: {{ default "2.9.0" (env "CHART_VERSION_OPENEBS") }}
-    rook: {{ default "v1.4.8" (env "CHART_VERSION_ROOK") }}
+    rook: {{ default "v1.7.4" (env "CHART_VERSION_ROOK") }}
     mysql: {{ default "6.14.12" (env "CHART_VERSION_MYSQL") }}
 
 ingress:
@@ -172,13 +172,13 @@ rook:
 patroni:
   replicas: {{ default 3 (env "RDBMS_COUNT") }}
   bouncers: 1
-  image: "registry.opensource.zalan.do/acid/spilo-13"
-  tag: "2.0-p7"
+  image: docker.io/zer0def/spilo
+  tag: 14-2.1p2-tsl2.4.2-citus
 
 {{ $osCommonNodeSelector := dict "node_selector_key" "node-role.kubernetes.io/node" "node_selector_value" "" }}
 openstack:
   namespace: {{ default "openstack" (env "OPENSTACK_NAMESPACE") }}
-  version: {{ default "wallaby" (env "OS_VERSION") }}
+  version: {{ default "xena" (env "OS_VERSION") }}
   baseImage: {{ default "ubuntu_bionic" (env "BASE_IMAGE") }}
   neutron:
     extBridge:

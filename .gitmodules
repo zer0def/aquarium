@@ -38,15 +38,18 @@
 [submodule "scylla"]
 	path = charts/scylla
 	url = https://github.com/zer0def/scylla-operator
-[submodule "minio-operator"]
-	path = charts/minio-operator
-	url = https://github.com/zer0def/minio-operator
 [submodule "sapcc"]
 	path = charts/sapcc
 	url = https://github.com/zer0def/sapcc-charts
 [submodule "redpanda"]
 	path = charts/redpanda
 	url = https://github.com/zer0def/redpanda-chart
+[submodule "seaweedfs"]
+	path = charts/seaweedfs
+	url = https://github.com/zer0def/seaweedfs
 [submodule "minio"]
 	path = charts/minio
 	url = https://github.com/zer0def/minio
+[submodule "minio-operator"]
+	path = charts/minio-operator
+	url = https://github.com/zer0def/minio-operator

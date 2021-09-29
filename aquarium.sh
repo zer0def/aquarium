@@ -318,17 +318,6 @@ install_service_mesh(){
     RELEASES_ISTIO_TELEMETRY_TRACING="${RELEASES_ISTIO_TELEMETRY_TRACING:-istio-tracing}"
 }
 
-install_minio(){
-  echo "Installing MinIO…"
-
-  : ${MINIO_ACCESS_KEY:=AKIAIOSFODNN7EXAMPLE}
-  : ${MINIO_SECRET_KEY:="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"}
-  : ${MINIO_DEFAULT_BUCKET:=minio-bucket}
-  : ${MINIO_SVC_PORT:=9000}
-  export ENABLE_MINIO=1 \
-    RELEASES_MINIO="${RELEASES_MINIO:-minio}"
-}
-
 install_openebs(){
   echo "Installing OpenEBS…"
   local NODE_NAME
@@ -346,22 +335,6 @@ install_prometheus_operator(){
   export RELEASES_THANOS="${RELEASES_THANOS:-thanos}" \
     RELEASES_KUBE_PROMETHEUS_STACK="${RELEASES_KUBE_PROMETHEUS_STACK:-kube-prometheus-stack}"
     RELEASES_PROMETHEUS_ADAPTER="${RELEASES_PROMETHEUS_ADAPTER:-prometheus-adapter}"
-  : ${THANOS_OBJSTORE_CONFIG_SECRET:=thanos-objstore-config}
-  : ${THANOS_SIDECAR_MTLS_SECRET:=thanos-sidecar-mtls}
-
-  # has to be object-store.yaml due to hard-coding of the filename in banzaicloud/thanos chart's secret.yaml template
-  : ${THANOS_OBJSTORE_CONFIG_FILENAME:=object-store.yaml}
-
-  NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
-  NAMESPACES_STORAGE="${NAMESPACES_STORAGE}" \
-  THANOS_OBJSTORE_CONFIG_SECRET="${THANOS_OBJSTORE_CONFIG_SECRET}" \
-  THANOS_OBJSTORE_CONFIG_FILENAME="${THANOS_OBJSTORE_CONFIG_FILENAME}" \
-  THANOS_SIDECAR_MTLS_SECRET="${THANOS_SIDECAR_MTLS_SECRET}" \
-  MINIO_DEFAULT_BUCKET="${MINIO_DEFAULT_BUCKET}" \
-  MINIO_SVC_PORT="${MINIO_SVC_PORT}" \
-  MINIO_ACCESS_KEY="${MINIO_ACCESS_KEY}" \
-  MINIO_SECRET_KEY="${MINIO_SECRET_KEY}" \
-  envsubst <"${MYDIR}/utils/manifests/thanos-objstore-secret.yml.shtpl" | kubectl apply -f-
 
   NAMESPACES_MONITORING="${NAMESPACES_MONITORING}" \
   envsubst <"${MYDIR}/utils/manifests/thanos-prometheus-query-svc.yml.shtpl" | kubectl apply -f-
@@ -370,7 +343,6 @@ install_prometheus_operator(){
 install_storage(){
   kubectl get secret local-harbor || kubectl create secret docker-registry local-harbor --docker-username=admin --docker-password="${HARBOR_ADMIN_PASSWORD:=Harbor12345}"
   install_openebs
-  install_minio
   export ENABLE_STORAGE=1 \
     RELEASES_HARBOR="${RELEASES_HARBOR:-harbor}" \
     RELEASES_PATRONI="${RELEASES_PATRONI:-patroni}" \
@@ -582,7 +554,7 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.21.5-k3s1}"
+    [k3d]="${RUNTIME_TAG:-1.22.2-k3s2}"
     [kubedee]="${RUNTIME_TAG:-1.22.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
