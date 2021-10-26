@@ -1,4 +1,8 @@
 #!/bin/bash -e
+if [ -n "${SCRIPT_DEBUG}" ]; then
+  set -x
+  export KUBEDEE_DEBUG=1
+fi
 export MYDIR="$(dirname "$(readlink -f "${0}")")"
 . "${MYDIR}/common"
 
@@ -7,7 +11,7 @@ BINARY_DEPENDENCIES=(docker "${HELM_BIN}" helmfile kubectl)
 
 # currently installed resources' requests have a hard time fitting on sub-quad-thread machines
 DEFAULT_WORKERS="$((4/$(nproc)))"
-[ "${DEFAULT_WORKERS}" -lt 1 ] && DEFAULT_WORKERS=1
+[ "${DEFAULT_WORKERS}" -ge 1 ] || DEFAULT_WORKERS=1
 
 K3D_OPTS=()
 KUBEDEE_OPTS=()
@@ -15,15 +19,15 @@ RESTART_CRIO=1
 
 install_docker_volume_plugin(){
   local PLUGIN_LS_OUT="$(docker plugin ls --format '{{.Name}},{{.Enabled}}' | grep -E "^${DOCKER_VOLUME_PLUGIN}")"
-  [ -z "${PLUGIN_LS_OUT}" ] && docker plugin install "${DOCKER_VOLUME_PLUGIN}" DATA_DIR="${DOCKER_VOLUME_DIR:=/tmp/docker-loop/data}"
+  [ -n "${PLUGIN_LS_OUT}" ] || docker plugin install "${DOCKER_VOLUME_PLUGIN}" DATA_DIR="${DOCKER_VOLUME_DIR:=/tmp/docker-loop/data}"
   echo "Sleeping 3 seconds for docker-volume-loopback to launch…" && sleep 3
-  [ "${PLUGIN_LS_OUT##*,}" != "true" ] && docker plugin enable "${DOCKER_VOLUME_PLUGIN}" ||:
+  [ "${PLUGIN_LS_OUT##*,}" = "true" ] || docker plugin enable "${DOCKER_VOLUME_PLUGIN}"
 }
 
 create_volumes(){
   local DOCKER_VOLUME_DRIVER
   : ${DOCKER_VOLUME_DRIVER:=${DOCKER_VOLUME_PLUGIN:-local}}
-  [ -n "${DOCKER_VOLUME_PLUGIN}" ] && install_docker_volume_plugin
+  [ -z "${DOCKER_VOLUME_PLUGIN}" ] || install_docker_volume_plugin
   local VOLUME_NAME
   for i in $(seq 0 "${NUM_WORKERS}"); do
     [ "${i}" -eq 0 ] && VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || VOLUME_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
@@ -68,9 +72,9 @@ registry_proxy_pre::k3d(){
   mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
   && docker run --entrypoint '' --rm "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" cat /etc/ssl/certs/ca-certificates.crt > "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt" \
   && K3D_OPTS+=(
-    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agent[*]"    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@server[*]"
-    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agent[*]"   '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@server[*]"
-    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@agent[*]" '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@server[*]"
+    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
+    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
+    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
     '-v' "${CLUSTER_CONFIG_HOST_PATH}/ssl:/etc/ssl/certs"
   )
 }
@@ -96,7 +100,7 @@ registry_proxy_post(){
 
 launch_cluster_post(){
   until kubectl apply -f "${MYDIR}/utils/manifests/psp.yml" &>/dev/null; do :; done
-  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_post ||:
+  [ "${INSTALL_REGISTRY_PROXY}" -ne 0 ] || registry_proxy_post
 }
 
 check_zfs(){
@@ -108,9 +112,9 @@ check_zfs(){
 
 launch_cluster::k3d(){
   #[ "${INSTALL_STORAGE}" -eq 0 ] && K3D_OPTS+=('--k3s-server-arg' '--disable=local-storage')
-  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && K3D_OPTS+=('--no-lb'
-    '--k3s-server-arg' '--disable=traefik'
-    '--k3s-server-arg' '--disable=servicelb'
+  [ "${INSTALL_SERVICE_MESH}" -ne 0 ] || K3D_OPTS+=('--no-lb'
+    '--k3s-arg' '--disable=traefik@servers:*'
+    '--k3s-arg' '--disable=servicelb@servers:*'
   )
 
   # base containerd config
@@ -168,17 +172,17 @@ EOF
     && ZFS_DATASET="$(docker info -f '{{range $a := .DriverStatus}}{{if eq (index $a 0) "Parent Dataset"}}{{(index $a 1)}}{{end}}{{end}}')" \
     && check_zfs && create_volumes ||:
 
-  echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' && create_volumes ||:
+  echo "${DOCKER_ROOT_FS}" | grep -vE '^(btr|tmp)fs$' || create_volumes
 
   # enable RuntimeClass admission controller?: https://kubernetes.io/docs/concepts/containers/runtime-class/
   k3d cluster create "${CLUSTER_NAME}" --wait \
     -s 1 -a "${NUM_WORKERS}" \
     --api-port "$((6443+${RANDOM}%100))" \
-    --k3s-agent-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
-    --k3s-agent-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --k3s-server-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%' \
-    --k3s-server-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%' \
-    --k3s-server-arg "--kube-apiserver-arg=enable-admission-plugins=NodeRestriction${PSP_ENABLED:+,PodSecurityPolicy}" \
+    --k3s-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%@agents:*' \
+    --k3s-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%@agents:*' \
+    --k3s-arg '--kubelet-arg=eviction-hard=imagefs.available<1%,nodefs.available<1%@servers:*' \
+    --k3s-arg '--kubelet-arg=eviction-minimum-reclaim=imagefs.available=1%,nodefs.available=1%@servers:*' \
+    --k3s-arg "--kube-apiserver-arg=enable-admission-plugins=NodeRestriction${PSP_ENABLED:+,PodSecurityPolicy}@servers:*" \
     -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
     -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
@@ -217,8 +221,8 @@ launch_cluster::kubedee(){
 
   launch_cluster_post
 
-  until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null ||:
-  until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null ||:
+  until kubectl -n kube-system wait --for condition=ready pod -l app=flannel,tier=node; do sleep 1; done 2>/dev/null
+  until kubectl -n kube-system wait --for condition=ready pod -l k8s-app=kube-dns; do sleep 1; done 2>/dev/null
 
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-" | grep -Ev '.*-etcd$'); do
     #RUNTIMES_ROOT=/opt/kata envsubst <"${MYDIR}/utils/manifests/crio-runtime-override.conf.tpl" >"${TMP_CRIO_CONF}"
@@ -238,19 +242,19 @@ launch_cluster::kubedee(){
 launch_cluster(){
   if [ "${K8S_RUNTIME}" = "k3d" ]; then
     mkdir -p "${CLUSTER_CONFIG_HOST_PATH}/ssl"
-    [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && KUBE_NOPROXY_SETTING+=("k3d-${CLUSTER_NAME}-registry") ||:
+    [ "${INSTALL_LOCAL_REGISTRY:=1}" -ne 0 ] || KUBE_NOPROXY_SETTING+=("k3d-${CLUSTER_NAME}-registry")
     LOCAL_REGISTRY_HOST="k3d-${CLUSTER_NAME}-registry" LOCAL_REGISTRY_PORT=5000
   else
-    [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] && KUBE_NOPROXY_SETTING+=(
+    [ "${INSTALL_LOCAL_REGISTRY:=1}" -ne 0 ] || KUBE_NOPROXY_SETTING+=(
       "kubedee-${CLUSTER_NAME}-registry" "registry.local"
-    ) ||:
+    )
     LOCAL_REGISTRY_HOST="registry.local" LOCAL_REGISTRY_PORT=5000
   fi
   [ "${INSTALL_LOCAL_REGISTRY:=1}" -eq 0 ] \
     && K3D_OPTS+=('--registry-create') \
     && KUBEDEE_OPTS+=('--enable-insecure-registry') ||:
 
-  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && registry_proxy_pre ||:
+  [ "${INSTALL_REGISTRY_PROXY}" -ne 0 ] || registry_proxy_pre
 
   "launch_cluster::${K8S_RUNTIME}"
 
@@ -259,19 +263,19 @@ launch_cluster(){
 }
 
 teardown_cluster::k3d(){
-  k3d cluster delete "${CLUSTER_NAME}" ||:
-  rm -rf "${CLUSTER_CONFIG_HOST_PATH}" ||:
-  echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' || [ "$(docker info -f '{{.Driver}}')" = "zfs" ] && docker volume rm -f $(docker volume ls --format '{{.Name}}' | awk "/^${K8S_RUNTIME}-${CLUSTER_NAME}-/") &>/dev/null ||:
+  k3d cluster delete "${CLUSTER_NAME}"
+  rm -rf "${CLUSTER_CONFIG_HOST_PATH}"
+  echo "${DOCKER_ROOT_FS}" | grep -E '^(btr|tmp)fs$' || [ "$(docker info -f '{{.Driver}}')" = "zfs" ] && docker volume rm -f $(docker volume ls --format '{{.Name}}' | awk "/^${K8S_RUNTIME}-${CLUSTER_NAME}-/") &>/dev/null
 }
 
 teardown_cluster::kubedee(){
-  "${MYDIR}/kubedee/kubedee" delete "${CLUSTER_NAME}" ||:
+  "${MYDIR}/kubedee/kubedee" delete "${CLUSTER_NAME}"
 }
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
-    [v1.21]="v2.3.1"
-    [v1.20]="v2.3.1"
+    [v1.21]="v2.4.0"
+    [v1.20]="v2.4.0"
     [v1.19]="v2.0.5"
     [v1.18]="v2.0.3"
     [v1.17]="v2.0.0-rc7"
@@ -323,7 +327,7 @@ install_openebs(){
   local NODE_NAME
   #OPENEBS_OMIT_LOOPDEVS="$(string_join , $(losetup -nlO NAME))"
 
-  [ "${K8S_RUNTIME}" = "k3d" ] && for i in $(seq 0 "${NUM_WORKERS}"); do
+  [ "${K8S_RUNTIME}" != "k3d" ] || for i in $(seq 0 "${NUM_WORKERS}"); do
     [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
     docker exec "${NODE_NAME}" mkdir -p /run/udev
   done
@@ -391,10 +395,10 @@ kube_up(){
   for i in ${!NAMESPACES[@]}; do export NAMESPACES_${i^^}="${NAMESPACES[${i}]}"; done
   for i in ${!VERSIONS[@]}; do export VERSIONS_${i^^}="${VERSIONS[${i}]}"; done
 
-  [ "${INSTALL_STORAGE}" -eq 0 ] && install_storage
-  [ "${INSTALL_SERVICE_MESH}" -eq 0 ] && install_service_mesh
-  [ "${INSTALL_MONITORING}" -eq 0 ] && install_monitoring
-  [ "${INSTALL_SERVERLESS}" -eq 0 ] && install_serverless
+  [ "${INSTALL_STORAGE}" -ne 0 ] || install_storage
+  [ "${INSTALL_SERVICE_MESH}" -ne 0 ] || install_service_mesh
+  [ "${INSTALL_MONITORING}" -ne 0 ] || install_monitoring
+  [ "${INSTALL_SERVERLESS}" -ne 0 ] || install_serverless
 
   # apply helm releases
   [ -n "${OMIT_HELMFILE}" ] || helmfile -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
@@ -404,7 +408,8 @@ kube_up(){
 }
 
 kube_down(){
-  [ "${INSTALL_REGISTRY_PROXY}" -eq 0 ] && docker rm -fv "${REGISTRY_PROXY_HOSTNAME}" ||:
+  set +e
+  [ "${INSTALL_REGISTRY_PROXY}" -ne 0 ] || docker rm -fv "${REGISTRY_PROXY_HOSTNAME}"
   "teardown_cluster::${K8S_RUNTIME}"
 }
 
@@ -531,7 +536,7 @@ main(){
   done
 
   export K8S_RUNTIME CLUSTER_NAME
-  [ -z "${SCRIPT_OP}" ] && usage
+  [ -n "${SCRIPT_OP}" ] || usage
 
   KUBEDEE_OPTS+=("${VM_MODE}"
     '--rootfs-size' "${ROOTFS_SIZE}"
@@ -554,8 +559,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.22.2-k3s2}"
-    [kubedee]="${RUNTIME_TAG:-1.22.2}"
+    [k3d]="${RUNTIME_TAG:-1.22.4-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.22.4}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

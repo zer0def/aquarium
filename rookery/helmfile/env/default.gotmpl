@@ -136,6 +136,7 @@ credentials:
 
 versions:
   images:
+    ceph: {{ default "16.2.5" (env "CEPH_VERSION") }}
     openebs: 2.10.0
   charts:
     mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
@@ -169,17 +170,33 @@ rook:
       name: my-store
       storageClass: rook-ceph-bucket
 
+ceph:
+  libvirtUUID: 457eb676-33da-42ec-9a8c-9293d545c337
+  pools:
+    glance: images
+    cinderVolume: volumes
+    cinderVolumeExt: volumes-ext
+    cinderBackup: backups
+    gnocchi: metrics
+    nova: vms
+  keyringSecrets:
+    admin: pvc-ceph-client-key
+    glance: glance-rbd
+    cinderVolume: cinder-volume-rbd
+    cinderBackup: cinder-backup-rbd
+    gnocchi: gnocchi-rbd
+
 patroni:
   replicas: {{ default 3 (env "RDBMS_COUNT") }}
   bouncers: 1
   image: docker.io/zer0def/spilo
-  tag: 14-2.1p2-tsl2.4.2-citus
+  tag: 14-2.1p3-tsl2.5.0-citus
 
 {{ $osCommonNodeSelector := dict "node_selector_key" "node-role.kubernetes.io/node" "node_selector_value" "" }}
 openstack:
   namespace: {{ default "openstack" (env "OPENSTACK_NAMESPACE") }}
   version: {{ default "xena" (env "OS_VERSION") }}
-  baseImage: {{ default "ubuntu_bionic" (env "BASE_IMAGE") }}
+  baseImage: {{ default "ubuntu_focal" (env "BASE_IMAGE") }}
   neutron:
     extBridge:
       name: br-ex

@@ -57,7 +57,52 @@ releases:
           [global]
           osd_pool_default_size = 1
       ---
-      # https://rook.io/docs/rook/master/ceph-cluster-crd.html
+      # https://rook.io/docs/rook/latest/ceph-client-crd.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.glance }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.glance }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd-read-only pool={{ .Values.ceph.pools.glance }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.nova }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}'
+      ---
+      # https://rook.io/docs/rook/latest/ceph-cluster-crd.html
       apiVersion: ceph.rook.io/v1
       kind: CephCluster
       metadata:
@@ -66,7 +111,7 @@ releases:
       spec:
         dataDirHostPath: /var/lib/rook
         cephVersion:
-          image: ceph/ceph:v{{ default "16.2.5" (env "CEPH_VERSION") }}
+          image: ceph/ceph:v{{ .Values.versions.images.ceph }}
           allowUnsupported: true
         mon:
           count: {{ default 3 (env "CEPH_MON_COUNT") }}
@@ -114,6 +159,21 @@ releases:
                   requests:
                     storage: {{ trimSuffix "B" (default "10GiB" (env "VOLUME_SIZE")) }}
 {{- end }}
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: {{ .Values.rook.namespace }}-mgr-dashboard-expose
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        type: NodePort
+        selector:
+          rook_cluster: {{ .Values.rook.namespace }}
+          app: rook-ceph-mgr
+        ports:
+        - port: 7000
+          protocol: TCP
+          targetPort: 7000
       ---
       apiVersion: v1
       kind: Service
@@ -210,9 +270,9 @@ releases:
       #until kubectl -n {{ .Values.rook.namespace }} wait --for condition=ready cephcluster {{ .Values.rook.cluster }}; do sleep 1; done 2>/dev/null
       kubectl apply -f- <<EOF
 {{- if .Values.rook.rbd.enabled }}
-      # https://rook.io/docs/rook/master/ceph-pool-crd.html
-      # https://rook.github.io/docs/rook/master/ceph-block.html
-      # https://rook.github.io/docs/rook/master/direct-tools.html
+      # https://rook.io/docs/rook/latest/ceph-pool-crd.html
+      # https://rook.github.io/docs/rook/latest/ceph-block.html
+      # https://rook.github.io/docs/rook/latest/direct-tools.html
       apiVersion: ceph.rook.io/v1
       kind: CephBlockPool
       metadata:
@@ -273,8 +333,8 @@ releases:
 {{- end }}
 {{- if .Values.rook.object.enabled }}
       ---
-      # https://rook.io/docs/rook/master/ceph-object-store-crd.html
-      # https://rook.github.io/docs/rook/master/ceph-object.html
+      # https://rook.io/docs/rook/latest/ceph-object-store-crd.html
+      # https://rook.github.io/docs/rook/latest/ceph-object.html
       apiVersion: ceph.rook.io/v1
       kind: CephObjectStore
       metadata:
@@ -318,8 +378,8 @@ releases:
 {{- end }}
 {{- if .Values.rook.cephfs.enabled }}
       ---
-      # https://rook.io/docs/rook/master/ceph-filesystem-crd.html
-      # https://rook.github.io/docs/rook/master/ceph-filesystem.html
+      # https://rook.io/docs/rook/latest/ceph-filesystem-crd.html
+      # https://rook.github.io/docs/rook/latest/ceph-filesystem.html
       apiVersion: ceph.rook.io/v1
       kind: CephFilesystem
       metadata:
@@ -341,7 +401,7 @@ releases:
           activeStandby: true
   {{- if .Values.rook.cephfs.nfs }}
       ---
-      # https://rook.io/docs/rook/master/ceph-nfs-crd.html
+      # https://rook.io/docs/rook/latest/ceph-nfs-crd.html
       apiVersion: ceph.rook.io/v1
       kind: CephNFS
       metadata:

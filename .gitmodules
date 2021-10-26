@@ -32,9 +32,6 @@
 [submodule "cortex"]
 	path = charts/cortex
 	url = https://github.com/zer0def/cortex-chart
-[submodule "promscale"]
-	path = charts/promscale
-	url = https://github.com/zer0def/promscale
 [submodule "scylla"]
 	path = charts/scylla
 	url = https://github.com/zer0def/scylla-operator
@@ -47,9 +44,6 @@
 [submodule "seaweedfs"]
 	path = charts/seaweedfs
 	url = https://github.com/zer0def/seaweedfs
-[submodule "minio"]
-	path = charts/minio
-	url = https://github.com/zer0def/minio
-[submodule "minio-operator"]
-	path = charts/minio-operator
-	url = https://github.com/zer0def/minio-operator
+[submodule "promscale"]
+	path = charts/promscale
+	url = https://github.com/timescale/promscale

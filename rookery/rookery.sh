@@ -89,17 +89,16 @@ systemctl restart docker
 docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
   -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" \
   --build-arg KUBE_VERSION=v${K8S_VERSION} \
-  --build-arg CEPH_RELEASE_TAG="${CEPH_VERSION}-1bionic" \
   -f "${OSH_IMG_LXD_LOCATION}/ceph-config-helper/Dockerfile.ubuntu_bionic" \
   "${OSH_IMG_LXD_LOCATION}/ceph-config-helper" \
 && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}")
 
 docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
   -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" \
-  --build-arg FROM=docker.io/ubuntu:focal \
-  --build-arg UBUNTU_RELEASE=focal \
-  --build-arg CEPH_RELEASE_TAG="${CEPH_VERSION}-1focal" \
-  -f "${OSH_IMG_LXD_LOCATION}/libvirt/Dockerfile.ubuntu_bionic" \
+  --build-arg FROM=docker.io/ubuntu:${BASE_IMAGE#*_} \
+  --build-arg UBUNTU_RELEASE=${BASE_IMAGE#*_} \
+  --build-arg UBUNTU_CLOUD_ARCHIVE_RELEASE="${OS_VERSION}" \
+  -f "${OSH_IMG_LXD_LOCATION}/libvirt/Dockerfile.ubuntu_${BASE_IMAGE#*_}" \
   "${OSH_IMG_LXD_LOCATION}/libvirt" \
 && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}")
 
@@ -147,7 +146,7 @@ docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${O
   --build-arg PROJECT_REF='stable/${OS_VERSION}' \
   --build-arg PROJECT_RELEASE='${OS_VERSION}' \
   --build-arg PIP_ARGS='${OS_PIP_ARGS[@]}' \
-  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} heat-dashboard' \
+  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} adjutant-ui blazar-dashboard cloudkitty-dashboard designate-dashboard heat-dashboard masakari-dashboard mistral-dashboard murano-dashboard neutron-vpnaas-dashboard octavia-dashboard sahara-dashboard senlin-dashboard solum-dashboard trove-dashboard vitrage-dashboard watcher-dashboard' \
   --build-arg PROJECT="horizon" \
   --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
   "${LOCI_LXD_LOCATION}" \
@@ -194,7 +193,11 @@ up(){
   # volume setup
   local i j
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-worker-"); do
-    lxc exec "${i}" -- zypper in -ly lvm2
+    lxc exec "${i}" -- /bin/sh <<'EOF'
+zypper in -ly lvm2 open-iscsi
+# http://blog.father.gedow.net/2013/05/21/ceph-as-cinder-storage/
+InitiatorName=$(iscsi-iname) > /etc/iscsi/initiatorname.iscsi
+EOF
     lxc stop "${i}" ||:
     for j in {b..g}; do
       lxc storage volume create "${LXD_STORAGE_POOL}" "${i}-sd${j}" size="${VOLUME_SIZE}" --type block
@@ -230,9 +233,9 @@ main(){
   : ${LXD_STORAGE_POOL:=default}
   : ${CLUSTER_NAME:=rookery}
   : ${NUM_WORKERS:=1}
-  : ${K8S_VERSION:=1.22.2}
+  : ${K8S_VERSION:=1.22.3}
   : ${OS_VERSION:=xena}
-  : ${BASE_IMAGE:=ubuntu_bionic}
+  : ${BASE_IMAGE:=ubuntu_focal}
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
   : ${WORKER_MEMORY_SIZE:=12GiB}
   : ${CEPH_VERSION:=16.2.5}
@@ -252,16 +255,16 @@ main(){
         NUM_WORKERS="${2}"
         shift 2
         ;;
-      -N | --name) CLUSTER_NAME="${2}"; shift 2;;
-      -V | --version) K8S_VERSION="${2}"; shift 2;;
-      -s | --storage-pool) LXD_STORAGE_POOL="${2}"; shift 2;;
-      -o | --openstack-version) OS_VERSION="${2}"; shift 2;;
-      -b | --base-image) BASE_IMAGE="${2}"; shift 2;;
-      -c | --controller-mem) CONTROLLER_MEMORY_SIZE="${2}"; shift 2;;
-      -w | --worker-mem) WORKER_MEMORY_SIZE="${2}"; shift 2;;
-      -C | --ceph-version) CEPH_VERSION="${2}"; shift 2;;
-      -p | --populate-local-registry) POPULATE_LOCAL_REGISTRY="y"; shift;;
-      up | down) SCRIPT_OP="${1}"; shift;;
+      -N | --name)                    CLUSTER_NAME="${2}";           shift 2;;
+      -V | --version)                 K8S_VERSION="${2}";            shift 2;;
+      -s | --storage-pool)            LXD_STORAGE_POOL="${2}";       shift 2;;
+      -o | --openstack-version)       OS_VERSION="${2}";             shift 2;;
+      -b | --base-image)              BASE_IMAGE="${2}";             shift 2;;
+      -c | --controller-mem)          CONTROLLER_MEMORY_SIZE="${2}"; shift 2;;
+      -w | --worker-mem)              WORKER_MEMORY_SIZE="${2}";     shift 2;;
+      -C | --ceph-version)            CEPH_VERSION="${2}";           shift 2;;
+      -p | --populate-local-registry) POPULATE_LOCAL_REGISTRY="y";   shift;;
+      up | down)                      SCRIPT_OP="${1}";              shift;;
       *) usage;;
     esac
   done

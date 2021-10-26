@@ -32,6 +32,7 @@ templates:
         {{ $asyncSvc }}:
           oslo_messaging_rabbit:
             heartbeat_timeout_threshold: 0
+            rabbit_ha_queues: true
   {{- if $.Values.openstack.tls.enabled }}
             ssl: true
             ssl_ca_file: /etc/rabbitmq/certs/ca.crt
@@ -249,6 +250,12 @@ releases:
   - {{ .Values.openstack.namespace }}/keystone
   hooks:
   - *helmToolkitDependencyFixup
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.glance }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)"
   values:
   - *openstackCommon
 {{- if .Values.openstack.tls.enabled }}
@@ -260,6 +267,8 @@ releases:
         glance_store:
           https_ca_certificates_file: /etc/glance/certs/ca.crt
           swift_store_cacert: /etc/glance/certs/ca.crt
+          rbd_store_pool: {{ .Values.ceph.pools.glance }}
+          rbd_store_user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}
       glance_registry:
         keystone_authtoken:
           cafile: /etc/glance/certs/ca.crt
@@ -290,10 +299,8 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: glance-registry-tls
-    ceph_client:
-      user_secret_name: pvc-ceph-client-key
     secrets:
-      rbd: glance-rbd
+      rbd: {{ .Values.ceph.keyringSecrets.glance }}
       tls:
         image:
           api:
@@ -314,6 +321,8 @@ releases:
     #        nginx.org/ssl-services: "glance-registry"
 {{- end }}
   - storage: rbd
+    ceph_client:
+      user_secret_name: {{ .Values.ceph.keyringSecrets.admin }}
     conf:
       glance:
         DEFAULT:
@@ -368,26 +377,43 @@ releases:
   - {{ .Values.openstack.namespace }}/keystone
   hooks:
   - *helmToolkitDependencyFixup
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderVolume }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)"
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderBackup }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)"
   values:
   - *openstackCommon
   - storage: ceph
     conf:
+      backends:
+        rbd1:
+          rbd_pool: {{ .Values.ceph.pools.cinderVolume }}
+          rbd_user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
       ceph:
         pools:
-          backup:
-            replication: 1
-            # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
-            crush_rule: {{ .Values.rook.replicaPool }}
-          cinder.volumes:
+          {{ .Values.ceph.pools.cinderBackup }}:
             replication: 2
             # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
             crush_rule: {{ .Values.rook.replicaPool }}
-      #cinder:
-      #  DEFAULT:
-      #    backup_driver: "cinder.backup.drivers.ceph.CephBackupDriver"
-      #    backup_ceph_conf: /etc/ceph/ceph.conf
-      #    backup_ceph_user: cinderbackup
-      #    backup_ceph_pool: cinder.backups
+            chunk_size: 8
+            app_name: cinder-backup
+          {{ .Values.ceph.pools.cinderVolume }}:
+            replication: 2
+            # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
+            crush_rule: {{ .Values.rook.replicaPool }}
+            chunk_size: 8
+            app_name: cinder-volume
+      cinder:
+        DEFAULT:
+          backup_driver: "cinder.backup.drivers.ceph.CephBackupDriver"
+          backup_ceph_conf: /etc/ceph/ceph.conf
+          backup_ceph_user:  {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}
+          backup_ceph_pool: {{ .Values.ceph.pools.cinderBackup }}
+        coordination:
+          backend_url: "postgresql://{{ $.Values.credentials.database.cinder.user }}:{{ $.Values.credentials.database.cinder.pass }}@{{ $.Values.credentials.database.root.host }}/cinder"
     images:
       tags:
         cinder_api: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
@@ -430,12 +456,12 @@ releases:
     manifests:
       network_policy: true
     ceph_client:
-      user_secret_name: pvc-ceph-client-key
+      user_secret_name: {{ .Values.ceph.keyringSecrets.admin }}
     secrets:
       rbd:
-        backup: cinder-backup-rbd
-        volume: cinder-volume-rbd
-        volume_external: cinder-volume-ext-rbd
+        backup: {{ .Values.ceph.keyringSecrets.cinderBackup }}
+        volume: {{ .Values.ceph.keyringSecrets.cinderVolume }}
+        volume_external: {{ .Values.ceph.pools.cinderVolumeExt }}
 {{- if .Values.openstack.tls.enabled }}
   - conf:
       cinder:
@@ -469,6 +495,15 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: cinder-v1-tls
+              dnsNames:
+              - "cinder"
+              - "cinder.{{ .Values.openstack.namespace }}"
+              - "cinder.{{ .Values.openstack.namespace }}.svc"
+              - "cinder.{{ .Values.openstack.namespace }}.svc.cluster.local"
+              - "cinder-api"
+              - "cinder-api.{{ .Values.openstack.namespace }}"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc.cluster.local"
       volumev2:
         hosts:
           default: cinder-api
@@ -482,6 +517,15 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: cinder-v2-tls
+              dnsNames:
+              - "cinder"
+              - "cinder.{{ .Values.openstack.namespace }}"
+              - "cinder.{{ .Values.openstack.namespace }}.svc"
+              - "cinder.{{ .Values.openstack.namespace }}.svc.cluster.local"
+              - "cinder-api"
+              - "cinder-api.{{ .Values.openstack.namespace }}"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc.cluster.local"
       volumev3:
         hosts:
           default: cinder-api
@@ -495,6 +539,15 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: cinder-v3-tls
+              dnsNames:
+              - "cinder"
+              - "cinder.{{ .Values.openstack.namespace }}"
+              - "cinder.{{ .Values.openstack.namespace }}.svc"
+              - "cinder.{{ .Values.openstack.namespace }}.svc.cluster.local"
+              - "cinder-api"
+              - "cinder-api.{{ .Values.openstack.namespace }}"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc"
+              - "cinder-api.{{ .Values.openstack.namespace }}.svc.cluster.local"
 {{- end }}
 
 - name: heat
@@ -820,6 +873,7 @@ releases:
     manifests:
       daemonset_sriov_agent: false
 
+{{- $cephKeyring := printf "%s-%s" .Values.openstack.namespace .Values.ceph.keyringSecrets.cinderVolume }}
 - name: nova
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/nova"
@@ -880,6 +934,15 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: nova-metadata-tls
+              dnsNames:
+              - "metadata"
+              - "metadata.{{ .Values.openstack.namespace }}"
+              - "metadata.{{ .Values.openstack.namespace }}.svc"
+              - "metadata.{{ .Values.openstack.namespace }}.svc.cluster.local"
+              - "nova-metadata"
+              - "nova-metadata.{{ .Values.openstack.namespace }}"
+              - "nova-metadata.{{ .Values.openstack.namespace }}.svc"
+              - "nova-metadata.{{ .Values.openstack.namespace }}.svc.cluster.local"
       compute_novnc_proxy:
         hosts:
           default: nova-novncproxy
@@ -971,7 +1034,8 @@ releases:
         nova_consoleauth: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
         nova_db_sync: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
         nova_novncproxy: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ .Values.openstack.version }}
+        #nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ .Values.openstack.version }}
+        nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:wallaby
         nova_placement: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
         nova_scheduler: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
         nova_service_cleaner: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
@@ -1015,6 +1079,7 @@ releases:
           annotations:
             nginx.org/rewrites: "serviceName=nova-novncproxy rewrite=/"
             nginx.org/websocket-services: nova-novncproxy
+            ingress.kubernetes.io/ssl-redirect: "False"  # insecure, I know
       #placement:
       #  ingress:
       #    annotations:
@@ -1060,38 +1125,6 @@ releases:
       secret_keystone_placement: false
       service_ingress_placement: false
       service_placement: false
-    conf:
-      ceph:
-        cinder:
-          user: admin
-      rabbitmq:
-        policies:
-        - vhost: "nova"
-          name: "ha_ttl_nova"
-          definition:
-            ha-mode: "all"
-            ha-sync-mode: "automatic"
-            message-ttl: 120000
-          priority: 0
-          apply-to: all
-          # only pattern changed
-          pattern: '^(?!amq\.).*'
-      nova:
-        api_database:
-          connection_recycle_time: 5
-          max_pool_size: 1
-          connection_debug: 100
-        database:
-          connection_recycle_time: 5
-          max_pool_size: 1
-          #min_pool_size: 0
-          connection_debug: 100
-          #use_db_reconnect: "True"
-          #use_tpool: "True"
-        cell0_database:
-          connection_recycle_time: 5
-          max_pool_size: 1
-          connection_debug: 100
     resources:
       enabled: true
     pod:
@@ -1113,6 +1146,45 @@ releases:
             {{ . }}:
               id: {{ . }}
 {{- end }}
+    conf:
+      enable_iscsi: true
+      ceph:
+        cinder:
+          secret_uuid: {{ .Values.ceph.libvirtUUID }}
+          user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+          keyring: {{ exec "/bin/sh" (list "-ec" (printf "until kubectl -n %s get secret/%s-client-%s &>/dev/null; do sleep 1; done; kubectl -n %s get secret/%s-client-%s -o jsonpath='{.data.%s}' | base64 -dw0" .Values.rook.namespace .Values.rook.namespace $cephKeyring .Values.rook.namespace .Values.rook.namespace $cephKeyring $cephKeyring)) | quote }}
+      rabbitmq:
+        policies:
+        - vhost: "nova"
+          name: "ha_ttl_nova"
+          definition:
+            ha-mode: "all"
+            ha-sync-mode: "automatic"
+            message-ttl: 120000
+          priority: 0
+          apply-to: all
+          # only pattern changed
+          pattern: '^(?!amq\.).*'
+      nova:
+        libvirt:
+          images_rbd_pool: {{ .Values.ceph.pools.nova }}
+          rbd_user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+          rbd_secret_uuid: {{ .Values.ceph.libvirtUUID }}
+        api_database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          connection_debug: 100
+        database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          #min_pool_size: 0
+          connection_debug: 100
+          #use_db_reconnect: "True"
+          #use_tpool: "True"
+        cell0_database:
+          connection_recycle_time: 5
+          max_pool_size: 1
+          connection_debug: 100
 
 - name: placement
   namespace: {{ .Values.openstack.namespace }}
@@ -1179,6 +1251,13 @@ releases:
   needs:
   - {{ .Values.openstack.namespace }}/patroni
   - {{ .Values.openstack.namespace }}/keystone
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.gnocchi }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)"
   values:
   - *openstackCommon
   - images:
@@ -1205,9 +1284,9 @@ releases:
           annotations:
             nginx.org/rewrites: "serviceName=gnocchi-api rewrite=/"
     ceph_client:
-      user_secret_name: pvc-ceph-client-key
+      user_secret_name: {{ .Values.ceph.keyringSecrets.admin }}
     secrets:
-      rbd: gnocchi-rbd
+      rbd: {{ .Values.ceph.keyringSecrets.gnocchi }}
       tls:
         metric:
           api:
@@ -1233,8 +1312,7 @@ releases:
         port:
           postgresql:
             default: {{ $.Values.credentials.database.root.port }}
-        #path: /gnocchi_indexer
-        path: /gnocchi
+        path: /gnocchi_indexer
         auth:
           gnocchi:
             username: {{ $.Values.credentials.database.gnocchi.user | quote }}
@@ -1250,6 +1328,11 @@ releases:
                 internal: ""
 {{- end }}
     conf:
+      gnocchi:
+        storage:
+          ceph_pool: {{ .Values.ceph.pools.gnocchi }}
+          ceph_username: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}
+          ceph_keyring: "/etc/ceph/ceph.client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}.keyring"
       paste:
         composite:gnocchi+keystone:
           use: egg:Paste#urlmap
@@ -1307,9 +1390,14 @@ releases:
             nginx.org/rewrites: "serviceName=ceilometer-api rewrite=/"
     conf:
       ceilometer:
+        DEFAULT:
+          debug: "True"
         api:
           aodh_is_enabled: "True"
           gnocchi_is_enabled: "True"
+        database:
+          metering_connection: "{{ $.Values.credentials.database.root.scheme }}://{{ $.Values.credentials.database.ceilometer.user }}:{{ $.Values.credentials.database.ceilometer.pass }}@{{ $.Values.credentials.database.root.host }}:{{ $.Values.credentials.database.root.port }}/ceilometer"
+          event_connection: "{{ $.Values.credentials.database.root.scheme }}://{{ $.Values.credentials.database.ceilometer.user }}:{{ $.Values.credentials.database.ceilometer.pass }}@{{ $.Values.credentials.database.root.host }}:{{ $.Values.credentials.database.root.port }}/ceilometer"
         notification:
           messaging_urls:
             type: multistring
@@ -1447,7 +1535,7 @@ releases:
 - name: barbican
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/barbican"
-  #installed: false  # add tls support in job-ks-service.yaml
+  installed: false  # add tls support in job-ks-service.yaml
   labels:
     app: openstack
   needs:

@@ -460,6 +460,7 @@ releases:
       ovs:
         <<: *openstackNeutronOvsNodeSelector
 
+{{- $cephKeyring := printf "%s-%s" .Values.openstack.namespace .Values.ceph.keyringSecrets.cinderVolume }}
 - name: libvirt
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/libvirt"
@@ -481,9 +482,14 @@ releases:
         libvirt:
           <<: *openstackComputeNodeSelector
     conf:
+      libvirt:
+        log_level: "1"
+        log_outputs: "1:stderr"
       ceph:
         cinder:
-          user: admin
+          secret_uuid: {{ .Values.ceph.libvirtUUID }}
+          user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+          keyring: {{ exec "/bin/sh" (list "-ec" (printf "until kubectl -n %s get secret/%s-client-%s &>/dev/null; do sleep 1; done; kubectl -n %s get secret/%s-client-%s -o jsonpath='{.data.%s}' | base64 -dw0" .Values.rook.namespace .Values.rook.namespace $cephKeyring .Values.rook.namespace .Values.rook.namespace $cephKeyring $cephKeyring)) | quote }}
 
 - name: powerdns
   namespace: {{ .Values.openstack.namespace }}

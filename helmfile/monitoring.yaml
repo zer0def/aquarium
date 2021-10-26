@@ -16,10 +16,7 @@ repositories:
 - name: grafana  # https://github.com/grafana/helm-charts
   url: "https://grafana.github.io/helm-charts"
 
-{{- $s3 := dict "endpoint" (printf "%s.%s.svc:%s" .Values.releases.minio .Values.namespaces.storage (toString .Values.minio.servicePort)) "accessKey" .Values.minio.accessKey "secretKey" .Values.minio.secretKey }}
-{{- if eq .Values.s3Type "seaweedfs" }}
-  {{- $s3 = dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
-{{- end }}
+{{- $s3 := dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
 
 templates:
   cortex:
@@ -62,7 +59,6 @@ releases:
   chart: banzaicloud/thanos
   installed: {{ and .Values.enables.monitoring (not .Values.enables.cortex) }}
   needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - fullnameOverride: {{ .Values.releases.thanos | quote }}
@@ -144,7 +140,6 @@ releases:
   installed: {{ and .Values.enables.monitoring .Values.enables.cortex }}
   skipDeps: true
   needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- if .Values.enables.cortex }}
   hooks:
@@ -310,7 +305,6 @@ releases:
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
@@ -384,6 +378,8 @@ releases:
           chunk_encoding: snappy
           chunk_retain_period: 1m
           max_transfer_retries: 0
+          wal:
+            dir: /var/loki/wal
           lifecycler:
             final_sleep: 0s
             ring:

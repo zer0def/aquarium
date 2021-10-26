@@ -2,10 +2,6 @@ bases:
 - "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
 ---
 repositories:
-- name: minio  # https://github.com/minio/charts
-  url: "https://helm.min.io"
-- name: minio-operator  # https://github.com/minio/operator
-  url: "https://operator.min.io"
 - name: dandy-developer  # https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
 - name: harbor  # https://github.com/goharbor/harbor-helm
@@ -24,135 +20,9 @@ templates:
         image:
           tag: v{{ .Values.versions.images.harbor }}
 
-{{- $s3 := dict "endpoint" (printf "%s.%s.svc:%s" .Values.releases.minio .Values.namespaces.storage (toString .Values.minio.servicePort)) "accessKey" .Values.minio.accessKey "secretKey" .Values.minio.secretKey }}
-{{- if eq .Values.s3Type "seaweedfs" }}
-  {{- $s3 = dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
-{{- end }}
+{{- $s3 := dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
 
 releases:
-{{/*
-- name: {{ .Values.releases.minio }}
-  namespace: {{ .Values.namespaces.storage }}
-  chart: minio/minio
-  version: {{ .Values.versions.charts.minio }}
-  installed: {{ and .Values.enables.storage (eq .Values.s3Type "minio") }}
-{{- if ne .Values.k8sRuntime "k3d" }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
-{{- end }}
-  values:
-  - fullnameOverride: {{ .Values.releases.minio | quote }}
-    image:
-      tag: {{ .Values.versions.images.minioServer }}
-    mcImage:
-      tag: {{ .Values.versions.images.minioClient }}
-    accessKey: {{ .Values.minio.accessKey | quote }}
-    secretKey: {{ .Values.minio.secretKey | quote }}
-    service:
-      port: {{ .Values.minio.servicePort }}
-      clusterIP: None
-    environment:
-      ## use access/secret keys
-      MINIO_STORAGE_CLASS_RRS: "EC:2"
-    extraArgs:
-    - --console-address=:31337
-    buckets:
-    - name: {{ .Values.thanosObjstoreConfig.bucket | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.harbor.bucket | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.sentry.bucket | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.cortex.buckets.blocks | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.cortex.buckets.notify | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.loki.buckets.chunks | quote }}
-      policy: none
-      purge: false
-    - name: {{ .Values.loki.buckets.notify | quote }}
-      policy: none
-      purge: false
-{{- if index .Values.patroni "walBucket" }}
-    - name: {{ .Values.patroni.walBucket | quote }}
-      policy: none
-      purge: false
-{{- end }}
-    resources:
-      requests:
-        memory: 256Mi
-    mode: distributed
-    replicas: {{ .Values.minio.replicas }}
-{{- if and .Values.enables.storage (eq .Values.s3Type "minio") }}
-  hooks:
-  - events: ["postsync"]
-    command: "/bin/sh"
-    args:
-    - "-xec"
-    - |
-      MC_NAME="mc-${RANDOM}"
-      kubectl -n {{ .Values.namespaces.storage }} apply -f- <<EOF
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: ${MC_NAME}
-      spec:
-        replicas: 1
-        selector:
-          matchLabels:
-            app: minio-client
-            release: ${MC_NAME}
-        template:
-          metadata:
-            labels:
-              app: minio-client
-              release: ${MC_NAME}
-          spec:
-            containers:
-            - name: mc
-              image: minio/mc
-              command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
-      EOF
-      until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add {{ .Values.s3Type }} http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}'
-      echo "MinIO is available under http://{{ $s3.endpoint }} with access key \"{{ $s3.accessKey }}\" and secret key \"{{ $s3.secretKey }}\"."
-{{- end }}
-
-- name: minio-operator
-  namespace: {{ .Values.namespaces.storage }}
-  chart: "{{ .Values.chartBases.minioOperator }}/minio-operator"
-  installed: {{ and .Values.enables.storage (eq .Values.s3Type "minio-operator") }}
-{{- if ne .Values.k8sRuntime "k3d" }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
-{{- end }}
-  values:
-  - console:
-      image:
-        tag: v0.8.3
-    tenants:
-    - name: mini0
-      namespace: {{ .Values.namespaces.storage }}
-      image:
-        tag: {{ .Values.versions.images.minioServer }}
-      pools:
-      - servers: 4
-        volumesPerServer: 1
-        size: 10Gi
-      secrets:
-        enabled: true
-        name: mini0-keys
-        accessKey: {{ $s3.accessKey | quote }}
-        secretKey: {{ $s3.secretKey | quote }}
-      metrics:
-        enabled: true
-*/}}
-
 - name: {{ .Values.releases.seaweedfs }}
   namespace: {{ .Values.namespaces.storage }}
   chart: {{ .Values.chartBases.seaweedfs | quote }}
@@ -272,7 +142,6 @@ releases:
         admin:
           accessKey: {{ .Values.seaweedfs.s3.keys.admin.accessKey | quote }}
           secretKey: {{ .Values.seaweedfs.s3.keys.admin.secretKey | quote }}
-{{- if and .Values.enables.storage (eq .Values.s3Type "seaweedfs") }}
   hooks:
   - events: ["postsync"]
     command: "/bin/sh"
@@ -303,9 +172,8 @@ releases:
               command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
       EOF
       until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add {{ .Values.s3Type }} http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}; for i in {{ .Values.thanosObjstoreConfig.bucket | quote }} {{ .Values.harbor.bucket | quote }} {{ .Values.sentry.bucket | quote }} {{ .Values.cortex.buckets.blocks | quote }} {{ .Values.cortex.buckets.notify | quote }} {{ .Values.loki.buckets.chunks | quote }} {{ .Values.loki.buckets.notify | quote }} {{ .Values.patroni.walBucket | quote }}; do mc ls "{{ .Values.s3Type }}/${i}" || mc mb "{{ .Values.s3Type }}/${i}"; done'
+      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add seaweedfs http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}; for i in {{ .Values.thanosObjstoreConfig.bucket | quote }} {{ .Values.harbor.bucket | quote }} {{ .Values.sentry.bucket | quote }} {{ .Values.cortex.buckets.blocks | quote }} {{ .Values.cortex.buckets.notify | quote }} {{ .Values.loki.buckets.chunks | quote }} {{ .Values.loki.buckets.notify | quote }} {{ .Values.patroni.walBucket | quote }}; do mc ls "seaweedfs/${i}" || mc mb "seaweedfs/${i}"; done'
       echo "MinIO is available under http://{{ $s3.endpoint }} with access key \"{{ $s3.accessKey }}\" and secret key \"{{ $s3.secretKey }}\"."
-{{- end }}
 
 {{- $patroniHashedName := printf "%s-%s" .Values.releases.patroni (printf "%s:%s" .Values.patroni.image .Values.patroni.tag | sha256sum | trunc 8) }}
 - name: {{ .Values.releases.patroni }}
@@ -318,7 +186,6 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
 {{- end }}
 {{- if index .Values.patroni "walBucket" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- end }}
 {{- if ne .Values.k8sRuntime "k3d" }}
@@ -611,7 +478,6 @@ releases:
   version: {{ .Values.versions.charts.harbor }}
   installed: {{ .Values.enables.storage }}
   needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.minio }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
