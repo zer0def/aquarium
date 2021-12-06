@@ -11,7 +11,7 @@ BINARY_DEPENDENCIES=(docker "${HELM_BIN}" helmfile kubectl)
 
 # currently installed resources' requests have a hard time fitting on sub-quad-thread machines
 DEFAULT_WORKERS="$((4/$(nproc)))"
-[ "${DEFAULT_WORKERS}" -ge 1 ] || DEFAULT_WORKERS=1
+[ "${DEFAULT_WORKERS}" -ge 2 ] || DEFAULT_WORKERS=2
 
 K3D_OPTS=()
 KUBEDEE_OPTS=()
@@ -72,9 +72,9 @@ registry_proxy_pre::k3d(){
   mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
   && docker run --entrypoint '' --rm "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" cat /etc/ssl/certs/ca-certificates.crt > "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt" \
   && K3D_OPTS+=(
-    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
-    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128"
-    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})"
+    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@servers:*"    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agents:*"
+    '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@servers:*"   '-e' "HTTPS_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agents:*"
+    '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@servers:*" '-e' "NO_PROXY=$(string_join , ${KUBE_NOPROXY_SETTING[@]})@agents:*"
     '-v' "${CLUSTER_CONFIG_HOST_PATH}/ssl:/etc/ssl/certs"
   )
 }
@@ -186,7 +186,7 @@ EOF
     -i "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" \
     -v "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl:/var/lib/rancher/k3s/agent/etc/containerd/config.toml.tmpl" \
     ${K3D_OPTS[@]}
-  export KUBECONFIG="$(k3d kubeconfig write "${CLUSTER_NAME}")"
+  export KUBECONFIG="$(k3d kubeconfig write "${CLUSTER_NAME}")" NODEPORT_HOST="$(docker inspect k3d-k3s-default-server-0 | jq -r .[].NetworkSettings.Networks[\"k3d-${CLUSTER_NAME}\"].IPAddress)"
   launch_cluster_post
 
   echo "Waiting for k3s cluster to come up…"
@@ -218,6 +218,7 @@ launch_cluster::kubedee(){
     --storage-pool "${LXD_STORAGE_POOL}" \
     ${KUBEDEE_OPTS[@]} up "${CLUSTER_NAME}"
   $("${MYDIR}/kubedee/kubedee" kubectl-env "${CLUSTER_NAME}")
+  export NODEPORT_HOST="$(lxc list --format json | jq -r ".[]|select(.name==\"kubedee-${CLUSTER_NAME}-controller\").state.network.eth0.addresses[] | select(.family==\"inet\" and .scope==\"global\").address" | head -n1)"
 
   launch_cluster_post
 
@@ -260,6 +261,7 @@ launch_cluster(){
 
   [ "${K8S_RUNTIME}" = "k3d" ] && kubectl apply -f "${MYDIR}/utils/manifests/k3d-syslogd.yml" \
     && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
+  install_rclone
 }
 
 teardown_cluster::k3d(){
@@ -274,6 +276,8 @@ teardown_cluster::kubedee(){
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
+    [v1.23]="v2.5.0"
+    [v1.22]="v2.5.0"
     [v1.21]="v2.4.0"
     [v1.20]="v2.4.0"
     [v1.19]="v2.0.5"
@@ -327,10 +331,12 @@ install_openebs(){
   local NODE_NAME
   #OPENEBS_OMIT_LOOPDEVS="$(string_join , $(losetup -nlO NAME))"
 
-  [ "${K8S_RUNTIME}" != "k3d" ] || for i in $(seq 0 "${NUM_WORKERS}"); do
-    [ "${i}" -eq 0 ] && NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" || NODE_NAME="${K8S_RUNTIME}-${CLUSTER_NAME}-agent-$((${i}-1))"
-    docker exec "${NODE_NAME}" mkdir -p /run/udev
-  done
+  if [ "${K8S_RUNTIME}" = "k3d" ]; then
+    docker exec "${K8S_RUNTIME}-${CLUSTER_NAME}-server-0" mkdir -p /run/udev
+    for i in $(seq 0 "$((${NUM_WORKERS}-1))"); do
+      docker exec "${K8S_RUNTIME}-${CLUSTER_NAME}-agent-${i}" mkdir -p /run/udev
+    done
+  fi
   export RELEASES_OPENEBS="${RELEASES_OPENEBS:-openebs}"
 }
 
@@ -363,6 +369,11 @@ install_monitoring(){
 install_serverless(){
   # kubeless/openfaas?
   export ENABLE_SERVERLESS=1 RELEASES_KUBELESS="${RELEASES_KUBELESS:-kubeless}"
+}
+
+install_rclone(){
+  kubectl apply -f "${MYDIR}/rclone/deploy/kubernetes"
+  # secret config?
 }
 
 show_ingress_points::k3d(){
@@ -474,7 +485,7 @@ main(){
   : ${INSTALL_MONITORING:=0}
   : ${INSTALL_SERVERLESS:=0}
 
-  : ${K8S_RUNTIME:=k3d}
+  : ${K8S_RUNTIME:=kubedee}
   : ${CLUSTER_NAME:=k3s-default}
   : ${NUM_WORKERS:=${DEFAULT_WORKERS}}
   : ${LXD_STORAGE_POOL:=default}
@@ -559,8 +570,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.22.4-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.22.4}"
+    [k3d]="${RUNTIME_TAG:-1.23.3-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.23.4}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

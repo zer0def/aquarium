@@ -15,6 +15,8 @@ repositories:
   url: "https://cortexproject.github.io/cortex-helm-chart"
 - name: grafana  # https://github.com/grafana/helm-charts
   url: "https://grafana.github.io/helm-charts"
+- name: opensearch  # https://github.com/opensearch-project/helm-charts
+  url: "https://opensearch-project.github.io/helm-charts"
 
 {{- $s3 := dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
 
@@ -141,6 +143,9 @@ releases:
   skipDeps: true
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+{{- range (list "" "-index" "-metadata") }}
+  - {{ $.Values.namespaces.monitoring }}/{{ $.Values.releases.cortex }}-memcached-blocks{{ . }}
+{{- end }}
 {{- if .Values.enables.cortex }}
   hooks:
   - events: ["presync"]
@@ -455,11 +460,8 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   values:
   - connection:
-      password:
-        timescaleDBSuperUserKey: password-superuser
-        secretTemplate: {{ .Values.releases.patroni | quote }}
-      host:
-        nameTemplate: '{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc'
+      uri: "postgresql://postgres:tea@{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432/timescale?sslmode=prefer"
+    #connectionSecretName:
     service:
       loadBalancer:
         enabled: false
@@ -502,6 +504,7 @@ releases:
         - url: "http://cortex-distributor.{{ .Values.namespaces.monitoring }}.svc:8080/api/v1/push"
 {{- end }}
 {{- end }}
+{{- if not .Values.enables.cortex }}
         secrets:  # mounted under /etc/prometheus/secrets/<secret_name>/<key>
         - {{ .Values.thanosSidecarMTLSSecret }}
         thanos:  # https://github.com/coreos/prometheus-operator/blob/master/Documentation/api.md#thanosspec
@@ -520,6 +523,7 @@ releases:
         #  - mountPath: /etc/prometheus/secrets/{{ .Values.thanosSidecarMTLSSecret }}
         #    readOnly: true
         #    name: secret-{{ .Values.thanosSidecarMTLSSecret }}
+{{- end }}
     grafana:
       image:
         repository: docker.io/grafana/grafana

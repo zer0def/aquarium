@@ -14,4 +14,5 @@ helmfiles:
 - "{{ requiredEnv "MYDIR" }}/helmfile/storage.yaml"
 - "{{ requiredEnv "MYDIR" }}/helmfile/network.yaml"
 - "{{ requiredEnv "MYDIR" }}/helmfile/monitoring.yaml"
-- "{{ requiredEnv "MYDIR" }}/helmfile/serverless.yaml"
+- "{{ requiredEnv "MYDIR" }}/helmfile/development.yaml"
+#- "{{ requiredEnv "MYDIR" }}/helmfile/streaming.yaml"

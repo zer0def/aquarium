@@ -4,14 +4,10 @@ bases:
 repositories:
 - name: dandy-developer  # https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
-- name: harbor  # https://github.com/goharbor/harbor-helm
-  url: "https://helm.goharbor.io"
-- name: sentry  # https://github.com/sentry-kubernetes/charts
-  url: "https://sentry-kubernetes.github.io/charts"
-- name: anchore  # https://github.com/anchore/anchore-charts
-  url: "https://charts.anchore.io"
 - name: scylla
   url: "https://scylla-operator-charts.storage.googleapis.com/stable"
+- name: yugabyte  # https://github.com/yugabyte/charts
+  url: "https://charts.yugabyte.com"
 
 templates:
   harbor:
@@ -172,13 +168,19 @@ releases:
               command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
       EOF
       until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-      kubectl -n {{ .Values.namespaces.storage }} exec $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -xc 'until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done; mc config host add seaweedfs http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}; for i in {{ .Values.thanosObjstoreConfig.bucket | quote }} {{ .Values.harbor.bucket | quote }} {{ .Values.sentry.bucket | quote }} {{ .Values.cortex.buckets.blocks | quote }} {{ .Values.cortex.buckets.notify | quote }} {{ .Values.loki.buckets.chunks | quote }} {{ .Values.loki.buckets.notify | quote }} {{ .Values.patroni.walBucket | quote }}; do mc ls "seaweedfs/${i}" || mc mb "seaweedfs/${i}"; done'
+      kubectl -n {{ .Values.namespaces.storage }} exec -ti $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -ex <<'EOF'
+      until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done
+      mc config host add seaweedfs http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}
+      for i in {{ .Values.thanosObjstoreConfig.bucket }} {{ .Values.harbor.bucket }} {{ .Values.sentry.bucket }} {{ .Values.cortex.buckets.blocks }} {{ .Values.cortex.buckets.notify }} {{ .Values.loki.buckets.chunks }} {{ .Values.loki.buckets.notify }} {{ .Values.patroni.walBucket }} {{ .Values.gitlab.buckets.registry }} {{ .Values.osp.bucket }}; do
+        mc ls "seaweedfs/${i}" || mc mb "seaweedfs/${i}"
+      done
+      EOF
       echo "MinIO is available under http://{{ $s3.endpoint }} with access key \"{{ $s3.accessKey }}\" and secret key \"{{ $s3.secretKey }}\"."
 
 {{- $patroniHashedName := printf "%s-%s" .Values.releases.patroni (printf "%s:%s" .Values.patroni.image .Values.patroni.tag | sha256sum | trunc 8) }}
 - name: {{ .Values.releases.patroni }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/incubator/patroni"
+  chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/patroni"
   installed: {{ .Values.enables.storage }}
   needs:
   - {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
@@ -304,6 +306,15 @@ releases:
     - name: {{ .Values.anchore.db.name | quote }}
       user: {{ .Values.anchore.db.user | quote }}
       pass: {{ .Values.anchore.db.pass | quote }}
+    - name: {{ .Values.gitlab.pgsql.name | quote }}
+      user: {{ .Values.gitlab.pgsql.user | quote }}
+      pass: {{ .Values.gitlab.pgsql.pass | quote }}
+    - name: {{ .Values.ejabberd.db.name | quote }}
+      user: {{ .Values.ejabberd.db.user | quote }}
+      pass: {{ .Values.ejabberd.db.pass | quote }}
+    - name: {{ .Values.osp.db.name | quote }}
+      user: {{ .Values.osp.db.user | quote }}
+      pass: {{ .Values.osp.db.pass | quote }}
 {{- if .Values.seaweedfs.filerIndex.postgresql.enabled }}
     - name: {{ .Values.seaweedfs.postgresql.name | quote }}
       user: {{ .Values.seaweedfs.postgresql.user | quote }}
@@ -443,194 +454,10 @@ releases:
     auth: true
     redisPassword: {{ .Values.redis.password }}
 
-- name: {{ .Values.releases.anchore }}
-  namespace: {{ .Values.namespaces.storage }}
-  chart: anchore/anchore-engine
-  #installed: {{ .Values.enables.storage }}
-  installed: {{ .Values.enables.anchore }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  values:
-  - postgresql:
-      enabled: false
-      externalEndpoint: "{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432"
-      postgresUser: {{ .Values.anchore.db.user }}
-      postgresPassword: {{ .Values.anchore.db.pass }}
-      postgresDatabase: {{ .Values.anchore.db.name }}
-    anchore-feeds-db:
-      enabled: false
-    anchoreEnterpriseFeeds:
-      enabled: false
-    anchoreEnterpriseFeedsUpgradeJob:
-      enabled: false
-    anchoreEnterpriseRbac:
-      enabled: false
-    anchoreEnterpriseReports:
-      enabled: false
-    anchoreEnterpriseUi:
-      enabled: false
-    anchore-ui-redis:
-      enabled: false
-
-- name: {{ .Values.releases.harbor }}
-  namespace: {{ .Values.namespaces.storage }}
-  chart: harbor/harbor
-  version: {{ .Values.versions.charts.harbor }}
-  installed: {{ .Values.enables.storage }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
-{{- if .Values.enables.anchore }}
-  hooks:
-  - events: ["postsync"]
-    command: "/bin/sh"
-    args:
-    - "-xec"
-    - |
-      # https://github.com/anchore/harbor-scanner-adapter
-      kubectl -n {{ .Values.namespaces.storage }} apply -f- <<EOF
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: harbor-scanner-anchore
-        labels:
-          app: harbor-scanner-anchore
-      spec:
-        selector:
-          matchLabels:
-            app: harbor-scanner-anchore
-        replicas: 1
-        template:
-          metadata:
-            labels:
-              app: harbor-scanner-anchore
-          spec:
-            containers:
-            - name: adapter
-              image: anchore/harbor-scanner-adapter:1.0.1
-              imagePullPolicy: IfNotPresent
-              env:
-              - name: SCANNER_ADAPTER_LISTEN_ADDR
-                value: ":8080"
-              - name: ANCHORE_ENDPOINT
-                value: "http://anchore-anchore-engine-api:8228"
-              - name: ANCHORE_USERNAME
-                value: {{ default "admin" (index .Values.anchore "admin_username") }}
-              - name: ANCHORE_PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: {{ .Values.releases.anchore }}-anchore-engine-admin-pass
-                    key: ANCHORE_ADMIN_PASSWORD
-              - name: ANCHORE_CLIENT_TIMEOUT_SECONDS
-                value: "60"
-              - name: SCANNER_ADAPTER_FILTER_VENDOR_IGNORED
-                value: "true"
-              - name: SCANNER_ADAPTER_LOG_LEVEL
-                value: "debug"
-              - name: SCANNER_ADAPTER_REGISTRY_TLS_VERIFY
-                value: "false"
-      ---
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: harbor-scanner-anchore
-      spec:
-        selector:
-          app: harbor-scanner-anchore
-        type: ClusterIP
-        ports:
-        - protocol: TCP
-          port: 8080
-          targetPort: 8080
-      EOF
-{{- end }}
-  values:
-  - nameOverride: {{ .Values.releases.harbor | quote }}
-    # default admin username for Harbor is `admin`
-    harborAdminPassword: {{ .Values.harbor.adminPassword | quote }}
-    externalURL: "https://{{ .Values.harbor.coreHostname }}"
-    #externalURL: "https://{{ .Values.releases.harbor }}-{{ .Values.releases.harbor }}-core.{{ .Values.namespaces.storage }}.svc"
-    expose:  # by default, service is `ingress`
-      tls:
-        enabled: true
-      #  auto:
-      #    commonName: {{ .Values.harbor.coreHostname }}
-      #type: nodePort
-      #nodePort:
-      #  ports:
-      #    http:
-      #      nodePort: {{ .Values.harbor.httpNodePort }}
-      ingress:
-        annotations:  # be sure to suffix registry with `:80` when pushing images
-          nginx.org/client-max-body-size: "0"
-          ingress.kubernetes.io/ssl-redirect: "false"
-          nginx.ingress.kubernetes.io/ssl-redirect: "false"
-        hosts:
-          core: {{ .Values.harbor.coreHostname }}
-    persistence:
-      imageChartStorage:
-        disableredirect: true
-        type: s3
-        s3:
-          accesskey: {{ $s3.accessKey | quote }}
-          secretkey: {{ $s3.secretKey | quote }}
-          bucket: {{ .Values.harbor.bucket | quote }}
-          # if using insecure object storage endpoints, you need to prefix it with `http://` protocol for chartmuseum to not barf
-          secure: false
-          regionendpoint: {{ $s3.endpoint | quote }}
-    database:
-      type: external
-      external:
-        host: {{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc
-        username: {{ .Values.harbor.db.core.user | quote }}
-        password: {{ .Values.harbor.db.core.pass | quote }}
-        coreDatabase: {{ .Values.harbor.db.core.name | quote }}
-        notaryServerDatabase: {{ .Values.harbor.db.notaryServer.name | quote }}
-        notarySignerDatabase: {{ .Values.harbor.db.notarySigner.name | quote }}
-        #sslmode: require
-    redis:
-      type: external
-      external:
-        addr: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
-        #host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
-        password: {{ .Values.redis.password | quote }}
-        coreDatabaseIndex: "0"
-        jobserviceDatabaseIndex: "1"
-        registryDatabaseIndex: "2"
-        chartmuseumDatabaseIndex: "3"
-        trivyAdapterIndex: "4"
-    nginx:
-      <<: *harborVersion
-    portal:
-      <<: *harborVersion
-    core:
-      <<: *harborVersion
-    jobservice:
-      <<: *harborVersion
-      jobLogger:
-      - database
-      #- file
-      #- stdout
-    registry:
-      registry:
-        <<: *harborVersion
-      controller:
-        <<: *harborVersion
-    chartmuseum:
-      <<: *harborVersion
-    trivy:
-      <<: *harborVersion
-    notary:
-      server:
-        <<: *harborVersion
-      signer:
-        <<: *harborVersion
-
 - name: {{ .Values.releases.kafka }}
   namespace: {{ .Values.namespaces.storage }}
   installed: {{ .Values.enables.storage }}
-  chart: "{{ requiredEnv "MYDIR" }}/charts/redpanda/redpanda"
+  chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/redpanda"
   values:
   - fullnameOverride: {{ .Values.releases.kafka }}
     image:
@@ -643,123 +470,6 @@ releases:
           address: "0.0.0.0"
         rpc_server:
           address: "0.0.0.0"
-
-- name: {{ .Values.releases.clickhouse }}
-  namespace: {{ .Values.namespaces.storage }}
-  chart: "{{ .Values.chartBases.sentry }}/clickhouse"
-  installed: {{ .Values.enables.storage }}
-  values:
-  - clickhouse:
-      replicas: {{ .Values.clickhouse.replicas | quote }}
-      image: {{ .Values.clickhouse.image }}
-      imageVersion: {{ .Values.versions.images.clickhouse }}
-      http_port: {{ .Values.clickhouse.httpPort | quote }}
-      tcp_port: {{ .Values.clickhouse.tcpPort | quote }}
-      configmap:
-        remote_servers:
-          internal_replication: true
-          replica:
-            backup:
-              enabled: false
-        users:
-          enabled: true
-          user:
-          - name: {{ .Values.clickhouse.firstUser.username }}
-            config:
-              password: {{ .Values.clickhouse.firstUser.password }}
-              networks:
-              - ::/0
-              profile: default
-              quota: default
-
-- name: {{ .Values.releases.sentry }}
-  namespace: {{ .Values.namespaces.storage }}
-  installed: {{ .Values.enables.storage }}
-  chart: "{{ .Values.chartBases.sentry }}/sentry"
-  skipDeps: true
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.clickhouse }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.kafka }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  values:
-  - sentry:
-      worker:
-        replicas: 1
-    images:
-      sentry:
-        tag: {{ .Values.versions.images.sentry }}
-    user:
-      email: {{ .Values.sentry.admin.user }}
-      password: {{ .Values.sentry.admin.password }}
-    postgresql:
-      enabled: false
-    externalPostgresql:
-      host: {{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc
-      username: {{ .Values.sentry.db.user | quote }}
-      password: {{ .Values.sentry.db.pass | quote }}
-      database: {{ .Values.sentry.db.name | quote }}
-    redis:
-      enabled: false
-    externalRedis:
-      host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
-      password: {{ .Values.redis.password | quote }}
-    clickhouse:
-      enabled: false
-      clickhouse:
-        image: {{ .Values.clickhouse.image }}
-        imageVersion: {{ .Values.versions.images.clickhouse }}
-    externalClickhouse:
-      host: {{ .Values.releases.clickhouse }}.{{ .Values.namespaces.storage }}.svc
-      tcpPort: {{ .Values.clickhouse.tcpPort }}
-      httpPort: {{ .Values.clickhouse.httpPort }}
-      username: {{ .Values.clickhouse.firstUser.username }}
-      password: {{ .Values.clickhouse.firstUser.password }}
-      clusterName: {{ .Values.releases.clickhouse }}
-    kafka:
-      enabled: false
-    externalKafka:
-      host: "{{ .Values.releases.kafka }}.{{ .Values.namespaces.storage }}.svc"
-      port: 9092
-{{/*
-{{- range $i, $v := until .Values.kafka.replicas }}
-    - host: "{{ $.Values.releases.kafka }}-{{ $i }}.{{ $.Values.releases.kafka }}.{{ $.Values.namespaces.storage }}.svc"
-      port: 9092
-{{- end }}
-*/}}
-    nginx:
-      enabled: false
-    rabbitmq:
-      enabled: false
-    ingress:
-      enabled: true
-    relay:
-      mode: proxy
-    filestore:
-      backend: s3
-      s3:
-        signature_version: v2
-        accessKey: {{ $s3.accessKey | quote }}
-        secretKey: {{ $s3.secretKey | quote }}
-        bucketName: {{ .Values.sentry.bucket | quote }}
-        endpointUrl: {{ $s3.endpoint | quote }}
-    snuba:
-{{- range (list "api" "dbInitJob" "migrateJob" "consumer" "replacer" "outcomesConsumer" "sessionsConsumer" "transactionsConsumer" "cleanupErrors" "cleanupTransactions") }}
-      {{ . }}:
-        replicas: 1
-        env:
-        - name: CLICKHOUSE_PORT
-          value: {{ $.Values.clickhouse.tcpPort | quote }}
-{{- end }}
-  hooks:
-  - events: ["presync"]
-    command: "/bin/sh"
-    args:
-    - "-xec"
-    - |
-{{- range $i, $v := until .Values.kafka.replicas }}
-      until kubectl -n {{ $.Values.namespaces.storage }} wait --for condition=ready pod {{ $.Values.releases.kafka }}-{{ $i }}; do sleep 1; done 2>/dev/null
-{{- end }}
 
 - name: swift
   namespace: {{ .Values.namespaces.storage }}

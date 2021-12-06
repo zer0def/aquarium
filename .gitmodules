@@ -1,7 +1,3 @@
-[submodule "zer0def-charts"]
-	path = charts/zer0def
-	url = https://github.com/zer0def/charts
-	branch = kube-dev
 [submodule "kubedee"]
 	path = kubedee
 	url = https://github.com/zer0def/kubedee
@@ -38,12 +34,18 @@
 [submodule "sapcc"]
 	path = charts/sapcc
 	url = https://github.com/zer0def/sapcc-charts
-[submodule "redpanda"]
-	path = charts/redpanda
-	url = https://github.com/zer0def/redpanda-chart
 [submodule "seaweedfs"]
 	path = charts/seaweedfs
 	url = https://github.com/zer0def/seaweedfs
 [submodule "promscale"]
 	path = charts/promscale
 	url = https://github.com/timescale/promscale
+[submodule "kube-httpcache"]
+	path = charts/kube-httpcache
+	url = https://github.com/mittwald/kube-httpcache
+[submodule "zer0def-charts"]
+	path = charts/zer0def
+	url = https://github.com/zer0def/charts
+[submodule "rclone"]
+	path = rclone
+	url = https://github.com/zer0def/csi-rclone

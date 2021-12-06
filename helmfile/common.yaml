@@ -14,6 +14,10 @@ repositories:
   url: "https://charts.bitnami.com/bitnami"
 - name: openebs  # https://github.com/openebs/charts
   url: "https://openebs.github.io/charts"
+- name: hashicorp  # https://github.com/hashicorp/vault-helm
+  url: "https://helm.releases.hashicorp.com"
+- name: external-secrets  # https://github.com/external-secrets/external-secrets/tree/main/deploy/charts/external-secrets
+  url: "https://charts.external-secrets.io"
 
 ## ingresses
 # ref: https://github.com/nginxinc/kubernetes-ingress/blob/master/docs/nginx-ingress-controllers.md#differences-between-nginxinckubernetes-ingress-and-kubernetesingress-nginx-ingress-controllers
@@ -33,8 +37,6 @@ repositories:
 
 - name: rancher
   url: "https://releases.rancher.com/server-charts/latest"
-- name: yugabyte  # https://github.com/yugabyte/charts
-  url: "https://charts.yugabyte.com"
 
 helmDefaults:
   wait: true
@@ -61,7 +63,6 @@ templates:
         imageTag: {{ .Values.versions.images.openebsNdm }}
 
 releases:
-{{- if ne .Values.k8sRuntime "k3d" }}
 - name: {{ .Values.releases.ingressController }}
   namespace: {{ .Values.namespaces.network }}
   chart: nginx/nginx-ingress
@@ -80,6 +81,7 @@ releases:
       image:
         tag: {{ .Values.versions.images.nginx }}
 
+{{- if ne .Values.k8sRuntime "k3d" }}
 - name: {{ .Values.releases.openebs }}
   namespace: {{ .Values.namespaces.storage }}
   chart: openebs/openebs
@@ -286,9 +288,11 @@ releases:
 - name: {{ .Values.releases.etcd }}
   namespace: {{ .Values.namespaces.storage }}
   chart: bitnami/etcd
-  #version: {{ .Values.versions.charts.etcd }}
+  version: {{ .Values.versions.charts.etcd }}
+{{- if ne .Values.k8sRuntime "k3d" }}
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
   values:
   - replicaCount: {{ .Values.etcd.replicas }}
     #podManagementPolicy: OrderedReady
@@ -301,3 +305,96 @@ releases:
       rbac:
         enabled: false
         rootPassword: etcd
+
+- name: {{ .Values.releases.vault }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: hashicorp/vault
+  #version: {{ .Values.versions.charts.vault }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
+  values:
+  - injector:
+      #metrics:
+      #  enabled: true
+      agentImage:
+        tag: {{ .Values.versions.images.vault }}
+    server:
+      affinity: ""
+      image:
+        tag: {{ .Values.versions.images.vault }}
+      auditStorage:
+        enabled: true
+      ha:
+        enabled: true
+        config: |
+          ui = true
+          listener "tcp" {
+            tls_disable = 1
+            address = "[::]:8200"
+            cluster_address = "[::]:8201"
+          }
+          storage "etcd" {
+            address = "http://{{ .Values.releases.etcd }}.{{ .Values.namespaces.storage }}.svc:2379"
+            path = "vault/"
+            ha_enabled = "true"
+            etcd_api = "v3"
+          }
+          service_registration "kubernetes" {}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-0" -- echo; do sleep 1; done 2>/dev/null ||:
+      TMPFILE="$(mktemp)"
+      kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-0" -- vault operator init >"${TMPFILE}"
+
+      for i in $(seq 0 2); do
+        awk '/Unseal Key/ {print $NF}' "${TMPFILE}" | xargs -n1 -- kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-${i}" -- vault operator unseal
+      done
+
+      kubectl apply -f- <<EOF
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: {{ .Values.externalSecrets.vaultTokenRef.namespace | quote }}
+        name: {{ .Values.externalSecrets.vaultTokenRef.secretName | quote }}
+      stringData:
+        {{ .Values.externalSecrets.vaultTokenRef.key }}: "$(awk '/Initial Root Token/ {print $NF}' "${TMPFILE}")"
+      EOF
+      rm "${TMPFILE}"
+
+- name: {{ .Values.releases.externalSecrets }}
+  namespace: {{ .Values.namespaces.storage }}
+  chart: external-secrets/external-secrets
+  version: {{ .Values.versions.charts.externalSecrets }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.vault }}
+  values:
+  - image:
+      tag: "v{{ .Values.versions.images.externalSecrets }}"
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl apply -f- <<EOF
+      # https://external-secrets.io/spec/
+      apiVersion: external-secrets.io/v1alpha1
+      kind: ClusterSecretStore
+      metadata:
+        name: vault-backend
+      spec:
+        provider:
+          vault:
+            server: "http://{{ .Values.releases.vault }}.{{ .Values.namespaces.storage }}.svc:8200"
+            path: "secret"
+            version: "v2"
+            auth:  # https://external-secrets.io/provider-hashicorp-vault/#kubernetes-authentication is probably a better idea
+              tokenSecretRef:
+                name: {{ .Values.externalSecrets.vaultTokenRef.secretName | quote }}
+                namespace: {{ .Values.externalSecrets.vaultTokenRef.namespace | quote }}
+                key: {{ .Values.externalSecrets.vaultTokenRef.key | quote }}
+      EOF

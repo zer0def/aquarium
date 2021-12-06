@@ -74,8 +74,8 @@ registry_proxy_post::kubedee(){
   local TMP_CA="$(mktemp)" \
     TMP_CRIO_CONF="$(mktemp)" \
     TMP_SYSTEMD_SVC="$(mktemp)" \
-    CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
-    #CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
+    CACERT_PATH="/etc/ssl/certs/ca-certificates.crt"
+    #CACERT_PATH="/var/lib/ca-certificates/ca-bundle.pem"
   lxc file pull "kubedee-${CLUSTER_NAME}-controller${CACERT_PATH}" "${TMP_CA}"
   chmod u+w "${TMP_CA}"
   mkdir -p "${REGISTRY_PROXY_HOST_PATH}"
