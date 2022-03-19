@@ -276,7 +276,7 @@ teardown_cluster::kubedee(){
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
-    [v1.23]="v2.5.0"
+    [v1.23]="v2.5.1"
     [v1.22]="v2.5.0"
     [v1.21]="v2.4.0"
     [v1.20]="v2.4.0"
@@ -570,8 +570,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.23.3-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.23.4}"
+    [k3d]="${RUNTIME_TAG:-1.23.4-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.23.5}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
