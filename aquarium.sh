@@ -570,7 +570,7 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.23.4-k3s1}"
+    [k3d]="${RUNTIME_TAG:-1.23.5-k3s1}"
     [kubedee]="${RUNTIME_TAG:-1.23.5}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1

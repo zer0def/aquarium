@@ -52,9 +52,9 @@ releases:
 versions:
   charts:
     etcd: {{ default "6.10.1" (env "CHART_VERSION_ETCD") }}
-    externalSecrets: {{ default "0.4.4" (env "CHART_VERSION_EXTERNAL_SECRETS") }}
+    externalSecrets: {{ default "0.5.1" (env "CHART_VERSION_EXTERNAL_SECRETS") }}
     grafana: {{ default "5.8.16" (env "CHART_VERSION_GRAFANA") }}
-    harbor: {{ default "1.8.2" (env "CHART_VERSION_HARBOR") }}
+    harbor: {{ default "1.9.0" (env "CHART_VERSION_HARBOR") }}
     jaegerOperator: {{ default "2.25.0" (env "CHART_VERSION_JAEGER_OPERATOR") }}
     kafka: {{ default "11.8.9" (env "CHART_VERSION_KAFKA") }}
     kiali: {{ default "1.38.1" (env "CHART_VERSION_KIALI") }}
@@ -66,13 +66,13 @@ versions:
     prometheus: {{ default "11.16.9" (env "CHART_VERSION_PROMETHEUS") }}
     vault: {{ default "0.19.0" (env "CHART_VERSION_VAULT") }}
   images:
-    certManager: {{ default "1.7.1" (env "VERSIONS_CERT_MANAGER") }}
+    certManager: {{ default "1.8.0" (env "VERSIONS_CERT_MANAGER") }}
     clickhouse: {{ default "20.8.9.6" (env "VERSIONS_CLICKHOUSE") }}
     cortex: {{ default "1.11.0" (env "VERSIONS_CORTEX") }}
     etcd: {{ default "3.5.1-debian-10-r50" (env "VERSIONS_ETCD") }}
-    externalSecrets: {{ default "0.4.4" (env "VERSIONS_EXTERNAL_SECRETS") }}
-    grafana: {{ default "8.4.4" (env "VERSIONS_GRAFANA") }}
-    harbor: {{ default "2.4.2" (env "VERSIONS_HARBOR") }}
+    externalSecrets: {{ default "0.5.1" (env "VERSIONS_EXTERNAL_SECRETS") }}
+    grafana: {{ default "8.4.6" (env "VERSIONS_GRAFANA") }}
+    harbor: {{ default "2.5.0" (env "VERSIONS_HARBOR") }}
     istio: {{ default "1.12.1" (env "VERSIONS_ISTIO") }}
     jaeger: {{ default "1.30.0" (env "VERSIONS_JAEGER") }}
     #jaeger: {{ default "1.32.0" (env "VERSIONS_JAEGER") }}
@@ -83,14 +83,14 @@ versions:
     prometheusAdapter: {{ default "0.9.1" (env "VERSIONS_PROMETHEUS_ADAPTER") }}
     redis: {{ default "6.2.5-alpine" (env "VERSIONS_REDIS") }}
     redisHaproxy: {{ default "lts-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
-    redPanda: {{ default "21.11.11" (env "VERSIONS_REDPANDA") }}
+    redPanda: {{ default "21.11.12" (env "VERSIONS_REDPANDA") }}
     scyllaAgent: {{ default "2.5.3" (env "VERSIONS_SCYLLA_AGENT") }}
     scyllaManager: {{ default "2.5.3" (env "VERSIONS_SCYLLA_MANAGER") }}
     scyllaManagerController: {{ default "2.5.3" (env "VERSIONS_SCYLLA_MANAGER") }}
     scyllaServer: {{ default "4.5.1" (env "VERSIONS_SCYLLA_SERVER") }}
     seaweedfs: {{ default "2.80" (env "VERSIONS_SEAWEEDFS") | quote }}
     sentry: {{ default "22.3.0" (env "VERSIONS_SENTRY") }}
-    thanos: {{ default "0.25.1" (env "VERSIONS_THANOS") }}
+    thanos: {{ default "0.25.2" (env "VERSIONS_THANOS") }}
     vault: {{ default "1.10.0" (env "VERSIONS_VAULT") }}
 
 chartBases:
