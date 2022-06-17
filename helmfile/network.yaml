@@ -10,8 +10,8 @@ repositories:
 {{- end }}
 - name: jaegertracing  # src: https://github.com/jaegertracing/helm-charts
   url: "https://jaegertracing.github.io/helm-charts"
-#- name: kiali  # https://github.com/kiali/helm-charts
-#  url: "https://kiali.org/helm-charts"
+- name: kiali  # https://github.com/kiali/helm-charts
+  url: "https://kiali.org/helm-charts"
 
 templates:
   istio:
@@ -449,9 +449,12 @@ releases:
       <<: *istioGlobal
     <<: *istioKiali
   {{- else }}
-  chart: "{{ requiredEnv "MYDIR" }}/charts/kiali-server-{{ .Values.versions.charts.kiali }}"
+  chart: "{{ requiredEnv "MYDIR" }}/charts/kiali/kiali-server"
   values:
   - {{ .Values.chartBases.istio }}/addons/values-kiali.yaml
+  - deployment:
+      image_version: "v{{ .Values.versions.images.kiali }}"
+      version_label: "v{{ .Values.versions.images.kiali }}"
   {{- end }}
 {{- end }}
 

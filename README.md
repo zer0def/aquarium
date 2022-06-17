@@ -92,14 +92,24 @@ Binaries/scripts (but not OCI images or Helm charts) listed below are expected t
 Logical components are split into namespaces according to the following logic:
 
 - storage:
-    - [OpenEBS](https://github.com/openebs/openebs) in local volume provisioner mode
-    - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage
-    - [Patroni](https://github.com/zalando/patroni)/[Spilo](https://github.com/zalando/spilo) for PostgreSQL deployment
-    - Redis
-    - [Harbor](https://github.com/goharbor/harbor) for cluster-local registry
+  - [External-Secrets](https://github.com/external-secrets/external-secrets)
+  - [OpenEBS](https://github.com/openebs/openebs) in local volume provisioner mode
+  - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage
+  - [Patroni](https://github.com/zalando/patroni)/[Spilo](https://github.com/zalando/spilo) for PostgreSQL deployment
+  - RedPanda (Kafka, but sucks less)
+  - Redis
+  - Scylla (Cassandra, but sucks less)
 - network/service mesh: [Istio](https://github.com/istio/istio)
-- monitoring: [Prometheus-Operator](https://github.com/coreos/prometheus-operator) with [Thanos](https://github.com/thanos-io/thanos)
+- monitoring:
+  - [Loki](https://github.com/grafana/loki)
+  - [OpenSearch](https://github.com/opensearch-project/OpenSearch)
+  - [Prometheus-Operator](https://github.com/coreos/prometheus-operator) with [Thanos](https://github.com/thanos-io/thanos) or [Cortex](https://github.com/cortexproject/cortex)
 - serverless: [OpenFAAS](https://docs.openfaas.com/), possibly [Kubeless](https://github.com/kubeless/kubeless)
+- development:
+  - [GitLab](https://gitlab.com/gitlab-org/gitlab)
+  - [Harbor](https://github.com/goharbor/harbor) for cluster-local registry
+  - [Sentry](https://github.com/getsentry/self-hosted)
+  - [Zulip](https://github.com/zulip/zulip)
 
 ## Known issues
 

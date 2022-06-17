@@ -31,15 +31,9 @@
 [submodule "scylla"]
 	path = charts/scylla
 	url = https://github.com/zer0def/scylla-operator
-[submodule "sapcc"]
-	path = charts/sapcc
-	url = https://github.com/zer0def/sapcc-charts
 [submodule "seaweedfs"]
 	path = charts/seaweedfs
 	url = https://github.com/zer0def/seaweedfs
-[submodule "promscale"]
-	path = charts/promscale
-	url = https://github.com/timescale/promscale
 [submodule "kube-httpcache"]
 	path = charts/kube-httpcache
 	url = https://github.com/mittwald/kube-httpcache
@@ -48,4 +42,24 @@
 	url = https://github.com/zer0def/charts
 [submodule "rclone"]
 	path = rclone
-	url = https://github.com/zer0def/csi-rclone
+	url = https://github.com/wunderio/csi-rclone
+[submodule "charts/sapcc"]
+	url = https://github.com/sapcc/helm-charts
+[submodule "kiali"]
+	path = charts/kiali
+	url = https://github.com/kiali/helm-charts
+[submodule "charts/zulip"]
+	path = charts/zulip
+	url = https://github.com/zer0def/oci-zulip
+[submodule "charts/draino"]
+	path = charts/draino
+	url = https://github.com/planetlabs/draino
+[submodule "charts/karma"]
+	path = charts/karma
+	url = https://github.com/ibelikov/helm-karma
+[submodule "charts/autoscaler"]
+	path = charts/autoscaler
+	url = https://github.com/kubernetes/autoscaler
+[submodule "shell-operator"]
+	path = shell-operator
+	url = https://github.com/flant/shell-operator

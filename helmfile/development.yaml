@@ -12,6 +12,8 @@ repositories:
   url: "https://charts.gitlab.io"
 - name: kong  # https://github.com/Kong/charts
   url: "https://charts.konghq.com"
+- name: bitnami  # memcached, https://github.com/bitnami/charts
+  url: "https://charts.bitnami.com/bitnami"
 - name: openfaas  # https://github.com/openfaas/faas-netes/tree/master/chart
   url: "https://openfaas.github.io/faas-netes"
 # https://github.com/fnproject/fn ?
@@ -31,8 +33,8 @@ releases:
   chart: anchore/anchore-engine
   #installed: {{ .Values.enables.storage }}
   installed: {{ .Values.enables.anchore }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   values:
   - postgresql:
       enabled: false
@@ -60,10 +62,10 @@ releases:
   chart: harbor/harbor
   version: {{ .Values.versions.charts.harbor }}
   installed: {{ .Values.enables.storage }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- if .Values.enables.anchore }}
   hooks:
   - events: ["postsync"]
@@ -245,10 +247,10 @@ releases:
   skipDeps: true
   needs:
   - {{ .Values.namespaces.development }}/{{ .Values.releases.clickhouse }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.kafka }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.kafka }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - sentry:
       worker:
@@ -461,8 +463,8 @@ releases:
   namespace: {{ .Values.namespaces.network }}
   chart: kong/kong
   installed: false
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   values:
   - env:
       database: postgres
@@ -525,9 +527,9 @@ releases:
       EOF
   needs:
   - {{ .Values.namespaces.development }}/{{ .Values.releases.sentry }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - certmanager:
       install: false
@@ -643,3 +645,81 @@ releases:
           connection:
             secret: {{ .Values.gitlab.secrets.s3 | quote }}
             key: rails
+
+- name: "{{ .Values.releases.zulip }}-memcached"
+  namespace: {{ .Values.namespaces.development }}
+  chart: bitnami/memcached
+  #version: {{ .Values.versions.charts.memcached }}
+{{- if ne $.Values.k8sRuntime "k3d" }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - architecture: high-availability
+    replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
+    image:
+      tag: {{ .Values.versions.images.memcached }}
+
+- name: "{{ .Values.releases.zulip }}-rabbitmq"
+  namespace: {{ .Values.namespaces.development }}
+  chart: bitnami/rabbitmq
+{{- if ne $.Values.k8sRuntime "k3d" }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+{{- end }}
+  values:
+  - replicaCount: 3
+    auth:
+      password: {{ .Values.rabbitmq.password | quote }}
+
+# kubectl -n development exec -ti zulip-0 -- sudo -u zulip /home/zulip/deployments/current/manage.py generate_realm_creation_link
+- name: {{ .Values.releases.zulip }}
+  namespace: {{ .Values.namespaces.development }}
+  chart: "{{ .Values.chartBases.zulip }}/zulip"
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl -n {{ .Values.namespaces.storage }} exec -ti $(kubectl -n {{ .Values.namespaces.storage }} get pod -l app=patroni,component=pgsql -o jsonpath='{.items[0].metadata.name}' --sort-by '{.metadata.name}') -- psql -U postgres -c 'create schema zulip authorization {{ .Values.zulip.db.user }};' {{ .Values.zulip.db.name }}
+  values:
+  - image:
+      tag: {{ .Values.versions.images.zulip }}
+    zulip:
+      password: sikrit
+      environment:
+        SETTING_EXTERNAL_HOST: zulip.local
+        DISABLE_HTTPS: "false"
+        #ZULIP_AUTH_BACKENDS: DevAuthBackend
+        SETTING_EMAIL_BACKEND: django.core.mail.backends.filebased.EmailBackend
+        SETTING_EMAIL_FILE_PATH: /var/tmp/mail
+
+        DB_HOST: "{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc"
+        DB_NAME: {{ .Values.zulip.db.name | quote }}
+        DB_USER: {{ .Values.zulip.db.user | quote }}
+        SECRETS_postgres_password: {{ .Values.zulip.db.pass | quote }}  # vividly insecure
+        SETTING_MEMCACHED_LOCATION: "{{ .Values.releases.zulip }}-memcached"
+        SECRETS_memcached_password:
+        SETTING_REDIS_HOST: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc"
+        SECRETS_redis_password: {{ .Values.redis.password | quote }}
+        SETTING_RABBITMQ_HOST: "{{ .Values.releases.zulip }}-rabbitmq.{{ .Values.namespaces.development }}.svc"
+        SETTING_RABBITMQ_USERNAME: user
+        SECRETS_rabbitmq_password: {{ .Values.rabbitmq.password | quote }}
+    memcached:
+      enabled: false
+    postgresql:
+      enabled: false
+    rabbitmq:
+      enabled: false
+    redis:
+      enabled: false
+    service:
+      type: NodePort
+      port: 443
+    ingress:
+      enabled: true
+      hosts:
+      - host: zulip.local
+        paths:
+        - path: /

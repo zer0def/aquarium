@@ -25,7 +25,7 @@ releases:
   installed: {{ .Values.enables.storage }}
   needs:
 {{- if ne .Values.k8sRuntime "k3d" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
@@ -183,7 +183,7 @@ releases:
   chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/patroni"
   installed: {{ .Values.enables.storage }}
   needs:
-  - {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
+  #- {{ .Values.namespaces.network }}/{{ .Values.releases.certManager }}
 {{- if index .Values.patroni "etcd" }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
 {{- end }}
@@ -191,7 +191,7 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- end }}
 {{- if ne .Values.k8sRuntime "k3d" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.patroni | quote }}
@@ -315,6 +315,9 @@ releases:
     - name: {{ .Values.osp.db.name | quote }}
       user: {{ .Values.osp.db.user | quote }}
       pass: {{ .Values.osp.db.pass | quote }}
+    - name: {{ .Values.zulip.db.name | quote }}
+      user: {{ .Values.zulip.db.user | quote }}
+      pass: {{ .Values.zulip.db.pass | quote }}
 {{- if .Values.seaweedfs.filerIndex.postgresql.enabled }}
     - name: {{ .Values.seaweedfs.postgresql.name | quote }}
       user: {{ .Values.seaweedfs.postgresql.user | quote }}
@@ -328,7 +331,7 @@ releases:
   installed: {{ .Values.enables.storage }}
   needs:
 {{- if ne .Values.k8sRuntime "k3d" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   hooks:
   - events: ["postsync"]
@@ -368,7 +371,7 @@ releases:
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
 {{- if ne .Values.k8sRuntime "k3d" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: "{{ .Values.releases.cassandra }}-manager"
@@ -397,7 +400,7 @@ releases:
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
 {{- if ne .Values.k8sRuntime "k3d" }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.cassandra }}
@@ -416,8 +419,8 @@ releases:
   chart: dandy-developer/redis-ha
   installed: {{ .Values.enables.storage }}
 {{- if ne .Values.k8sRuntime "k3d" }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.redis | quote }}
@@ -470,15 +473,15 @@ releases:
           address: "0.0.0.0"
         rpc_server:
           address: "0.0.0.0"
-
+{{/*
 - name: swift
   namespace: {{ .Values.namespaces.storage }}
   #installed: {{ .Values.enables.storage }}
   installed: false
   chart: "{{ .Values.chartBases.swift }}/swift"
 {{- if ne .Values.k8sRuntime "k3d" }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - debug: true
@@ -491,3 +494,4 @@ releases:
       image:
         repository: haproxy
         tag: lts-alpine
+*/}}

@@ -60,8 +60,8 @@ releases:
   namespace: {{ .Values.namespaces.monitoring }}
   chart: banzaicloud/thanos
   installed: {{ and .Values.enables.monitoring (not .Values.enables.cortex) }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - fullnameOverride: {{ .Values.releases.thanos | quote }}
     objstoreSecretOverride: {{ .Values.thanosObjstoreConfig.secret | quote }}
@@ -127,8 +127,10 @@ releases:
   chart: bitnami/memcached
   installed: {{ and $.Values.enables.monitoring $.Values.enables.cortex }}
   version: {{ $.Values.versions.charts.memcached }}
-  needs:
-  - {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
+{{- if ne $.Values.k8sRuntime "k3d" }}
+  #needs:
+  #- {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
+{{- end }}
   values:
   - architecture: high-availability
     replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
@@ -142,7 +144,7 @@ releases:
   installed: {{ and .Values.enables.monitoring .Values.enables.cortex }}
   skipDeps: true
   needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
 {{- range (list "" "-index" "-metadata") }}
   - {{ $.Values.namespaces.monitoring }}/{{ $.Values.releases.cortex }}-memcached-blocks{{ . }}
 {{- end }}
@@ -308,10 +310,10 @@ releases:
   chart: grafana/loki-distributed
   installed: {{ .Values.enables.monitoring }}
   needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.etcd }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
   values:
   - fullnameOverride: loki
 {{- range (list "distributor" "ingester" "querier" "queryFrontend" "gateway") }}
@@ -367,6 +369,7 @@ releases:
           reject_old_samples: true
           reject_old_samples_max_age: 168h
           max_cache_freshness_per_query: 10m
+          split_queries_by_interval: 15m
         server:
           http_listen_port: {{ .Values.loki.ports.http }}
         distributor:
@@ -434,7 +437,6 @@ releases:
         query_range:
           align_queries_with_step: true
           max_retries: 5
-          split_queries_by_interval: 15m
           cache_results: true
           results_cache:
             cache:
@@ -453,11 +455,13 @@ releases:
 # requires non-free timescale-licensed addon to timescaledb.so
 - name: {{ .Values.releases.promscale }}
   namespace: {{ .Values.namespaces.storage }}
-  #chart: timescale/promscale
-  chart: "{{ .Values.chartBases.promscale }}"
+  chart: timescale/promscale
+{{/*
+  #chart: "{{ .Values.chartBases.promscale }}"
+*/}}
   installed: {{ and .Values.enables.storage .Values.enables.monitoring }}
-  needs:
-  - {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
+  #needs:
+  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   values:
   - connection:
       uri: "postgresql://postgres:tea@{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432/timescale?sslmode=prefer"
@@ -576,3 +580,66 @@ releases:
     prometheus:
       url: "http://{{ .Values.releases.kubePromStack }}-prometheus.{{ .Values.namespaces.monitoring }}.svc"
     rules: {}
+
+# default u:p → admin:admin
+# default tls on, requires `play.ws.ssl.loose.acceptAnyCertificate = true` in cerebro
+- name: {{ .Values.releases.opensearch }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: opensearch/opensearch
+  version: {{ .Values.versions.charts.opensearch }}
+{{- if ne .Values.k8sRuntime "k3d" }}
+  #needs:
+  #- {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
+{{- end }}
+  values:
+  - majorVersion: 2
+    securityConfig:
+      enabled: false
+    extraInitContainers:
+    - name: sysctl
+      securityContext:
+        runAsUser: 0
+        privileged: true
+      image: "alpine:edge"
+      command: ["sysctl", "-w", "vm.max_map_count=262144"]
+
+## doesn't interface well for some reason?
+# default u:p → admin:admin
+- name: {{ .Values.releases.opensearchDashboards }}
+  namespace: {{ .Values.namespaces.monitoring }}
+  chart: opensearch/opensearch-dashboards
+  version: {{ .Values.versions.charts.opensearch }}
+{{- if ne .Values.k8sRuntime "k3d" }}
+  #needs:
+  #- {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
+{{- end }}
+  values:
+  - service:
+      type: NodePort
+    #config:  #https://opensearch.org/docs/latest/dashboards/install/tls/
+      opensearch_dashboards.yml: |
+        server:
+          host: "0.0.0.0"
+        opensearch:  # server-side
+          hosts:
+          - "https://opensearch-cluster-master-headless.{{ .Values.namespaces.monitoring }}.svc:9200"
+          username: admin
+          password: admin
+          requestHeadersWhitelist:
+          - authorization
+          - securitytenant
+          ssl:
+            verificationMode: none  # full, certificate or none
+            #certificateAuthorities: ["<pemFile>"]
+        opensearch_security:
+          readonly_mode:
+            roles:
+            - kibana_read_only
+          multitenancy:
+            enabled: true
+            tenants:
+              preferred:
+              - Private
+              - Global
+          cookie:
+            secure: false

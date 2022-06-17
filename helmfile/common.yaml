@@ -28,6 +28,10 @@ repositories:
   url: https://kubernetes.github.io/ingress-nginx
 - name: prometheus-community  # https://github.com/prometheus-community/helm-charts
   url: "https://prometheus-community.github.io/helm-charts"
+- name: vmware-tanzu
+  url: "https://vmware-tanzu.github.io/helm-charts"
+- name: kedacore
+  url: "https://kedacore.github.io/charts"
 
 # curiosities
 #
@@ -211,7 +215,7 @@ releases:
       until kubectl -n {{ .Values.namespaces.network }} wait --for condition=ready pod -l app.kubernetes.io/instance=cert-manager,app.kubernetes.io/component=webhook; do sleep 1; done 2>/dev/null ||:
       until [ $(kubectl get validatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
       until [ $(kubectl get mutatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
-      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}') -- wget https://cert-manager-webhook.{{ .Values.namespaces.network }}.svc &>/dev/null; do sleep 1; done
+      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}' --sort-by '{.metadata.name}') -- wget https://cert-manager-webhook.{{ .Values.namespaces.network }}.svc &>/dev/null; do sleep 1; done
       kubectl apply -f- <<EOF
       apiVersion: cert-manager.io/v1
       kind: ClusterIssuer
@@ -295,6 +299,8 @@ releases:
 {{- end }}
   values:
   - replicaCount: {{ .Values.etcd.replicas }}
+    image:
+      tag: {{ .Values.versions.images.etcd }}
     #podManagementPolicy: OrderedReady
     autoCompactionMode: periodic
     autoCompactionRetention: 1
@@ -303,6 +309,8 @@ releases:
       value: "8589934592"
     auth:
       rbac:
+        create: false
+        allowNoneAuthentication: true
         enabled: false
         rootPassword: etcd
 
@@ -346,12 +354,12 @@ releases:
     args:
     - "-xec"
     - |
-      until kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-0" -- echo; do sleep 1; done 2>/dev/null ||:
+      until kubectl -n {{ .Values.namespaces.storage }} exec -i "{{ .Values.releases.vault }}-0" -- echo; do sleep 1; done 2>/dev/null ||:
       TMPFILE="$(mktemp)"
-      kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-0" -- vault operator init >"${TMPFILE}"
+      until kubectl -n {{ .Values.namespaces.storage }} exec -i "{{ .Values.releases.vault }}-0" -- vault operator init >"${TMPFILE}"; do sleep 3; done
 
       for i in $(seq 0 2); do
-        awk '/Unseal Key/ {print $NF}' "${TMPFILE}" | xargs -n1 -- kubectl -n {{ .Values.namespaces.storage }} exec -ti "{{ .Values.releases.vault }}-${i}" -- vault operator unseal
+        awk '/Unseal Key/ {print $NF}' "${TMPFILE}" | xargs -n1 -- kubectl -n {{ .Values.namespaces.storage }} exec -i "{{ .Values.releases.vault }}-${i}" -- vault operator unseal
       done
 
       kubectl apply -f- <<EOF

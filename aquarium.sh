@@ -46,30 +46,10 @@ create_volumes(){
 }
 
 # common functions start
-kata_pre::k3d(){  # containerd config reference… of sorts
-  for i in qemu fc clh; do
-    # https://github.com/kata-containers/documentation/blob/master/how-to/containerd-kata.md
-    # https://github.com/kata-containers/packaging/blob/master/kata-deploy/scripts/kata-deploy.sh
-    K3D_OPTS+=('-v' "${MYDIR}/utils/kata/shims/containerd-shim-kata-${i}-${SHIM_VERSION}:/usr/local/bin/containerd-shim-kata-${i}-${SHIM_VERSION}")
-    cat <<EOF >> "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl"
-[plugins.cri.containerd.runtimes.kata-${i}]
-  runtime_type = "io.containerd.kata-${i}.${SHIM_VERSION}"
-  #privileged_without_host_devices = true
-[plugins.cri.containerd.runtimes.kata-${i}.options]
-  ConfigPath = "/usr/local/share/defaults/kata-containers/configuration-${i}.toml"
-EOF
-  done \
-  && cat <<EOF >> "${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl"
-[plugins.cri.containerd.untrusted_workload_runtime]
-  runtime_type = "io.containerd.kata.${SHIM_VERSION}"
-  privileged_without_host_devices = true
-[plugins.cri.containerd.untrusted_workload_runtime.options]
-  ConfigPath = "/usr/local/share/defaults/kata-containers/configuration-qemu.toml"
-EOF
-}
-
 registry_proxy_pre::k3d(){
-  mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
+  for i in $(seq 0 $((${NUM_CONTROLLERS:-1}-1))); do KUBE_NOPROXY_SETTING+=("k3d-${CLUSTER_NAME}-server-${i}"); done \
+  && for i in $(seq 0 $((${NUM_WORKERS}-1))); do KUBE_NOPROXY_SETTING+=("k3d-${CLUSTER_NAME}-agent-${i}"); done \
+  && mkdir -p "${REGISTRY_PROXY_HOST_PATH}" \
   && docker run --entrypoint '' --rm "rancher/k3s:v${RUNTIME_VERSIONS[k3d]}" cat /etc/ssl/certs/ca-certificates.crt > "${CLUSTER_CONFIG_HOST_PATH}/ssl/ca-certificates.crt" \
   && K3D_OPTS+=(
     '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@servers:*"    '-e' "HTTP_PROXY=http://${REGISTRY_PROXY_HOSTNAME}:3128@agents:*"
@@ -140,11 +120,30 @@ sandbox_image = "{{ .NodeConfig.AgentConfig.PauseImage }}"
 {{ end -}}
 
 [plugins.cri.containerd.runtimes.runc]
+  privileged_without_host_devices = false
   runtime_type = "io.containerd.runc.${SHIM_VERSION}"
 
-#[plugins.cri.containerd.default_runtime]
-#  #runtime_type = "io.containerd.runtime.v1.linux"
-#  runtime_type = "io.containerd.runc.${SHIM_VERSION}"
+[plugins.cri.containerd.runtimes.kata-qemu]
+  privileged_without_host_devices = true
+  runtime_type = "io.containerd.kata.v2"
+  pod_annotations = ["io.katacontainers.*"]
+  container_annotations = ["io.katacontainers.*"]
+[plugins.cri.containerd.runtimes.kata-qemu.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-qemu.toml"
+[plugins.cri.containerd.runtimes.kata-fc]
+  privileged_without_host_devices = true
+  runtime_type = "io.containerd.kata.v2"
+  pod_annotations = ["io.katacontainers.*"]
+  container_annotations = ["io.katacontainers.*"]
+[plugins.cri.containerd.runtimes.kata-fc.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-fc.toml"
+[plugins.cri.containerd.runtimes.kata-clh]
+  privileged_without_host_devices = true
+  runtime_type = "io.containerd.kata.v2"
+  pod_annotations = ["io.katacontainers.*"]
+  container_annotations = ["io.katacontainers.*"]
+[plugins.cri.containerd.runtimes.kata-clh.options]
+  ConfigPath = "/opt/kata/share/defaults/kata-containers/configuration-clh.toml"
 
 [plugins.cri.registry.mirrors]
   [plugins.cri.registry.mirrors."${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}"]
@@ -154,20 +153,6 @@ sandbox_image = "{{ .NodeConfig.AgentConfig.PauseImage }}"
 #    endpoint = ["http://${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}"]
 EOF
 
-#  for i in $(seq 16 31); do
-#    cat <<EOF >>${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
-#  [plugins.cri.registry.mirrors."172.${i}.0.2:${HARBOR_HTTP_NODEPORT}"]
-#    endpoint = ["http://172.${i}.0.2:${HARBOR_HTTP_NODEPORT}"]
-#EOF
-#  done
-#
-#  for i in $(seq 0 16 255); do
-#    cat <<EOF >>${CLUSTER_CONFIG_HOST_PATH}/config.toml.tmpl
-#  [plugins.cri.registry.mirrors."192.168.${i}.2:${HARBOR_HTTP_NODEPORT}"]
-#    endpoint = ["http://192.168.${i}.2:${HARBOR_HTTP_NODEPORT}"]
-#EOF
-#  done
-
   [ "$(docker info -f '{{.Driver}}')" = "zfs" ] \
     && ZFS_DATASET="$(docker info -f '{{range $a := .DriverStatus}}{{if eq (index $a 0) "Parent Dataset"}}{{(index $a 1)}}{{end}}{{end}}')" \
     && check_zfs && create_volumes ||:
@@ -175,6 +160,10 @@ EOF
   echo "${DOCKER_ROOT_FS}" | grep -vE '^(btr|tmp)fs$' || create_volumes
 
   # enable RuntimeClass admission controller?: https://kubernetes.io/docs/concepts/containers/runtime-class/
+    #-v "/opt/kata:/opt/kata" \
+    #-e "LD_LIBRARY_PATH=/lib64:/lib@servers:*" -e "LD_LIBRARY_PATH=/lib64:/lib@agents:*" \
+    #-v "/usr/lib/libpthread.so.0:/lib/libpthread.so.0" -v "/usr/lib/libdl.so.2:/lib/libdl.so.2" \
+    #-v "/usr/lib/libc.so.6:/lib/libc.so.6" -v "/usr/lib64/ld-linux-x86-64.so.2:/lib64/ld-linux-x86-64.so.2" \
   k3d cluster create "${CLUSTER_NAME}" --wait \
     -s 1 -a "${NUM_WORKERS}" \
     --api-port "$((6443+${RANDOM}%100))" \
@@ -211,7 +200,7 @@ launch_cluster::kubedee(){
 
   # crio.conf `storage_driver` value might need parameterization
   # ref: https://github.com/containers/storage/blob/master/docs/containers-storage.conf.5.md#storage-table
-  "${MYDIR}/kubedee/kubedee" ${PSP_ENABLED:+--install-psps} \
+  "${MYDIR}/kubedee/kubedee" ${PSP_ENABLED:+--install-psps} --enable-kata \
     --apiserver-extra-hostnames "kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local" \
     --kubernetes-version "v${RUNTIME_VERSIONS[kubedee]}" \
     --num-worker "${NUM_WORKERS}" \
@@ -276,8 +265,9 @@ teardown_cluster::kubedee(){
 
 install_dashboard(){
   declare -A K8S_DASHBOARD=(
+    [v1.24]="v2.6.0"
     [v1.23]="v2.5.1"
-    [v1.22]="v2.5.0"
+    [v1.22]="v2.5.1"
     [v1.21]="v2.4.0"
     [v1.20]="v2.4.0"
     [v1.19]="v2.0.5"
@@ -372,7 +362,7 @@ install_serverless(){
 }
 
 install_rclone(){
-  kubectl apply -f "${MYDIR}/rclone/deploy/kubernetes"
+  kubectl apply -f "${MYDIR}/rclone/deploy/kubernetes/1.19"
   # secret config?
 }
 
@@ -570,8 +560,8 @@ main(){
   declare -A RUNTIME_VERSIONS=(
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
-    [k3d]="${RUNTIME_TAG:-1.23.5-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.23.5}"
+    [k3d]="${RUNTIME_TAG:-1.24.2-k3s1}"
+    [kubedee]="${RUNTIME_TAG:-1.24.2}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2
