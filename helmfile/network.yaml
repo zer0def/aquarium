@@ -12,6 +12,8 @@ repositories:
   url: "https://jaegertracing.github.io/helm-charts"
 - name: kiali  # https://github.com/kiali/helm-charts
   url: "https://kiali.org/helm-charts"
+- name: traefik  # https://github.com/traefik/traefik-helm-chart
+  url: "https://traefik.github.io/charts"
 
 templates:
   istio:

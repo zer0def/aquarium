@@ -16,7 +16,10 @@ repositories:
   url: "https://charts.bitnami.com/bitnami"
 - name: openfaas  # https://github.com/openfaas/faas-netes/tree/master/chart
   url: "https://openfaas.github.io/faas-netes"
-# https://github.com/fnproject/fn ?
+- name: fission  # https://github.com/fission/fission-charts
+  url: "https://fission.github.io/fission-charts"
+- name: argoproj  # https://github.com/argoproj/argo-helm/tree/main/charts
+  url: "https://argoproj.github.io/argo-helm"
 
 templates:
   harbor:
@@ -177,8 +180,8 @@ releases:
     redis:
       type: external
       external:
-        addr: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
-        #host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
+        addr: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+        #host: {{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc
         password: {{ .Values.redis.password | quote }}
         coreDatabaseIndex: "0"
         jobserviceDatabaseIndex: "1"
@@ -243,6 +246,7 @@ releases:
 - name: {{ .Values.releases.sentry }}
   namespace: {{ .Values.namespaces.development }}
   installed: {{ .Values.enables.storage }}
+  #installed: false
   chart: "{{ .Values.chartBases.sentry }}/sentry"
   skipDeps: true
   needs:
@@ -261,6 +265,8 @@ releases:
     user:
       email: {{ .Values.sentry.admin.user }}
       password: {{ .Values.sentry.admin.password }}
+    hooks:
+      activeDeadlineSeconds: 300
     postgresql:
       enabled: false
     externalPostgresql:
@@ -271,7 +277,7 @@ releases:
     redis:
       enabled: false
     externalRedis:
-      host: {{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc
+      host: {{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc
       password: {{ .Values.redis.password | quote }}
     clickhouse:
       enabled: false
@@ -329,40 +335,6 @@ releases:
 {{- range $i, $v := until .Values.kafka.replicas }}
       until kubectl -n {{ $.Values.namespaces.storage }} wait --for condition=ready pod {{ $.Values.releases.kafka }}-{{ $i }}; do sleep 1; done 2>/dev/null
 {{- end }}
-
-# doc:
-# - https://kubeless.io/docs/
-- name: {{ .Values.releases.kubeless }}
-  namespace: {{ .Values.namespaces.serverless }}
-  # should be installing upstream incubator/kubeless chart, but it's shit
-  chart: "{{ requiredEnv "MYDIR" }}/charts/zer0def/incubator/kubeless"
-  #installed: {{ .Values.enables.serverless }}
-  installed: false
-  values:
-  - nameOverride: {{ .Values.releases.kubeless | quote }}
-    rbac:
-      create: true
-    controller:
-      deployment:
-        functionController:
-          image:
-            tag: v1.0.7
-        httpTriggerController:
-          image:
-            tag: v1.0.2
-        cronJobTriggerController:
-          image:
-            tag: v1.0.3
-    kafkaTrigger:
-      deployment:
-        image:
-          tag: v1.0.4
-    config:
-      functionsNamespace: {{ .Values.namespaces.serverlessFunctions }}
-    ui:
-      enabled: true
-      service:
-        type: ClusterIP
 
 # doc:
 # - https://docs.openfaas.com/
@@ -451,13 +423,12 @@ releases:
 # ref: https://github.com/fission/fission/tree/master/charts
 - name: fission
   namespace: {{ .Values.namespaces.serverless }}
-  #chart: https://github.com/fission/fission/releases/download/1.11.2/fission-all-1.11.2.tgz
-  chart: https://github.com/fission/fission/releases/download/1.11.2/fission-core-1.11.2.tgz
+  chart: fission/fission-all
   #installed: {{ .Values.enables.serverless }}
   installed: false
   values:
-  - functionNamespace: {{ .Values.namespaces.serverlessFunctions }}
-    builderNamespace: {{ .Values.namespaces.serverlessBuild }}
+  - functionNamespace: fission-func
+    builderNamespace: fission-build
 
 - name: kong
   namespace: {{ .Values.namespaces.network }}
@@ -482,8 +453,8 @@ releases:
 - name: {{ .Values.releases.gitlab }}
   namespace: {{ .Values.namespaces.development }}
   chart: gitlab/gitlab
-  #installed: {{ .Values.enables.storage }}
-  installed: false  # pinned to k8s-1.21, because they're unable to bump their ingress controller for 3 months: https://gitlab.com/gitlab-org/charts/gitlab/-/issues/2852
+  installed: {{ .Values.enables.storage }}
+  #installed: false  # pinned to k8s-1.21, because they're unable to bump their ingress controller for 3 months: https://gitlab.com/gitlab-org/charts/gitlab/-/issues/2852
   hooks:
   - events: ["presync"]
     command: "/bin/sh"
@@ -539,8 +510,17 @@ releases:
       install: false
     prometheus:
       install: false
+    gitlab:
+      gitlab-shell:
+        minReplicas: 1
+      kas:
+        minReplicas: 1
+      webservice:
+        minReplicas: 1
     registry:
       bucket: {{ .Values.gitlab.buckets.registry }}
+      hpa:
+        minReplicas: 1
     gitlab-runner:
       install: false
       runners:
@@ -591,7 +571,7 @@ releases:
         #  clientCertificate:
         #  clientKey:
       #redis:  # no database number specification is sus, use the bundled cluster
-      #  host: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc"
+      #  host: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc"
       #  port: {{ .Values.redis.ports.readwrite }}
       #  password:
       #    enabled: true
@@ -701,7 +681,7 @@ releases:
         SECRETS_postgres_password: {{ .Values.zulip.db.pass | quote }}  # vividly insecure
         SETTING_MEMCACHED_LOCATION: "{{ .Values.releases.zulip }}-memcached"
         SECRETS_memcached_password:
-        SETTING_REDIS_HOST: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc"
+        SETTING_REDIS_HOST: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc"
         SECRETS_redis_password: {{ .Values.redis.password | quote }}
         SETTING_RABBITMQ_HOST: "{{ .Values.releases.zulip }}-rabbitmq.{{ .Values.namespaces.development }}.svc"
         SETTING_RABBITMQ_USERNAME: user

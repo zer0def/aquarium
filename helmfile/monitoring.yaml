@@ -17,6 +17,12 @@ repositories:
   url: "https://grafana.github.io/helm-charts"
 - name: opensearch  # https://github.com/opensearch-project/helm-charts
   url: "https://opensearch-project.github.io/helm-charts"
+- name: signoz  # https://github.com/SigNoz/charts
+  url: "https://charts.signoz.io"
+- name: victoriametrics  # https://github.com/VictoriaMetrics/helm-charts
+  url: "https://victoriametrics.github.io/helm-charts"
+- name: zer0def
+  url: "https://zer0def.github.io/charts"
 
 {{- $s3 := dict "endpoint" (printf "%s-s3.%s.svc:%s" .Values.releases.seaweedfs .Values.namespaces.storage (toString .Values.seaweedfs.ports.http.s3)) "accessKey" .Values.seaweedfs.s3.keys.admin.accessKey "secretKey" .Values.seaweedfs.s3.keys.admin.secretKey }}
 
@@ -42,7 +48,7 @@ templates:
   grafana:
     values:
     - &grafanaRedis
-      endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+      endpoint: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
       password: {{ .Values.redis.password | quote }}
     - &etcdKvStore
       store: etcd
@@ -58,7 +64,7 @@ templates:
 releases:
 - name: {{ .Values.releases.thanos }}
   namespace: {{ .Values.namespaces.monitoring }}
-  chart: banzaicloud/thanos
+  chart: zer0def/thanos
   installed: {{ and .Values.enables.monitoring (not .Values.enables.cortex) }}
   #needs:
   #- {{ .Values.namespaces.storage }}/{{ .Values.releases.seaweedfs }}
@@ -126,7 +132,7 @@ releases:
   namespace: {{ $.Values.namespaces.monitoring }}
   chart: bitnami/memcached
   installed: {{ and $.Values.enables.monitoring $.Values.enables.cortex }}
-  version: {{ $.Values.versions.charts.memcached }}
+  #version: {{ $.Values.versions.charts.memcached }}
 {{- if ne $.Values.k8sRuntime "k3d" }}
   #needs:
   #- {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}
@@ -348,7 +354,7 @@ releases:
           index_queries_cache_config:
             redis:
               #<<: *grafanaRedis
-              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              endpoint: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
               password: {{ .Values.redis.password | quote }}
               db: 12
         schema_config:
@@ -422,13 +428,13 @@ releases:
           chunk_cache_config:
             redis:
               #<<: *grafanaRedis
-              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              endpoint: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
               password: {{ .Values.redis.password | quote }}
               db: 14
           write_dedupe_cache_config:
             redis:
               #<<: *grafanaRedis
-              endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+              endpoint: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
               password: {{ .Values.redis.password | quote }}
               db: 15
         table_manager:
@@ -442,7 +448,7 @@ releases:
             cache:
               redis:
                 #<<: *grafanaRedis
-                endpoint: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+                endpoint: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
                 password: {{ .Values.redis.password | quote }}
                 db: 13
         frontend_worker:
@@ -465,6 +471,8 @@ releases:
   values:
   - connection:
       uri: "postgresql://postgres:tea@{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432/timescale?sslmode=prefer"
+    image:
+      tag: {{ .Values.versions.images.promscale }}
     #connectionSecretName:
     service:
       loadBalancer:
@@ -481,6 +489,9 @@ releases:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.promscale }}
   values:
   - fullnameOverride: {{ .Values.releases.kubePromStack | quote }}
+    kube-state-metrics:
+      image:
+        tag: v2.6.0
     prometheus:
       prometheusSpec:
         podMetadata:
@@ -608,7 +619,7 @@ releases:
 - name: {{ .Values.releases.opensearchDashboards }}
   namespace: {{ .Values.namespaces.monitoring }}
   chart: opensearch/opensearch-dashboards
-  version: {{ .Values.versions.charts.opensearch }}
+  version: {{ .Values.versions.charts.opensearchDashboards }}
 {{- if ne .Values.k8sRuntime "k3d" }}
   #needs:
   #- {{ $.Values.namespaces.storage }}/{{ $.Values.releases.openebs }}

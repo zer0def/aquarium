@@ -2,12 +2,14 @@ bases:
 - "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
 ---
 repositories:
-- name: dandy-developer  # https://github.com/DandyDeveloper/charts
+- name: dandy-developer  # redis, https://github.com/DandyDeveloper/charts
   url: "https://dandydeveloper.github.io/charts"
 - name: scylla
   url: "https://scylla-operator-charts.storage.googleapis.com/stable"
 - name: yugabyte  # https://github.com/yugabyte/charts
   url: "https://charts.yugabyte.com"
+- name: enapter  # keydb, redis fork; https://github.com/enapter/charts
+  url: "https://enapter.github.io/charts"
 
 templates:
   harbor:
@@ -25,7 +27,7 @@ releases:
   installed: {{ .Values.enables.storage }}
   needs:
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   #- {{ .Values.namespaces.storage }}/{{ .Values.releases.patroni }}
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.redis }}
@@ -38,12 +40,15 @@ releases:
       #enableSecurity: true
     master:
       enabled: true
+      imageTag: {{ .Values.versions.images.seaweedfs }}
       replicas: 3
       affinity: ""
       nodeSelector: ""
       port: {{ .Values.seaweedfs.ports.http.master }}
       grpcPort: {{ .Values.seaweedfs.ports.grpc.master }}
       defaultReplication: "001"
+      volumePreallocate: false
+      volumeSizeLimitMB: "30000"
       #storage: 25Gi
       #storageClass: null
       extraEnvironmentVars:
@@ -52,6 +57,7 @@ releases:
       nodeSelector: ""
     volume:
       enabled: true
+      imageTag: {{ .Values.versions.images.seaweedfs }}
       replicas: 3
       affinity: ""
       nodeSelector: ""
@@ -78,12 +84,13 @@ releases:
         size: 8Ti
     filer:
       enabled: true
+      imageTag: {{ .Values.versions.images.seaweedfs }}
       replicas: 3
       affinity: ""
       nodeSelector: ""
       port: {{ .Values.seaweedfs.ports.http.filer }}
       grpcPort: {{ .Values.seaweedfs.ports.grpc.filer }}
-      metricsPort: 0
+      #metricsPort: 0
       defaultReplicaPlacement: "001"
       s3:
         allowEmptyFolder: true
@@ -94,17 +101,17 @@ releases:
       #  domainName: ""
         keys:
           admin:
-            accessKey: {{ .Values.seaweedfs.s3.keys.admin.accessKey | quote }}
-            secretKey: {{ .Values.seaweedfs.s3.keys.admin.secretKey | quote }}
+            accessKey: {{ $s3.accessKey | quote }}
+            secretKey: {{ $s3.secretKey | quote }}
       extraEnvironmentVars:
 {{- if .Values.seaweedfs.filerIndex.redis.enabled }}
         #WEED_REDIS_CLUSTER_ENABLED: "true"
-        #WEED_REDIS_CLUSTER_ADDRESSES: '["{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"]'
+        #WEED_REDIS_CLUSTER_ADDRESSES: '["{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"]'
         #WEED_REDIS_CLUSTER_PASSWORD: {{ .Values.redis.password | quote }}
         #WEED_REDIS_CLUSTER_DATABASE: {{ .Values.seaweedfs.filerIndex.redis.db | quote }}
         #WEED_REDIS_CLUSTER2_SUPERLARGEDIRECTORIES: '["/"]'
         WEED_REDIS_ENABLED: "true"
-        WEED_REDIS_ADDRESS: "{{ .Values.releases.redis }}-haproxy.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
+        WEED_REDIS_ADDRESS: "{{ .Values.releases.redis }}.{{ .Values.namespaces.storage }}.svc:{{ .Values.redis.ports.readwrite }}"
         WEED_REDIS_PASSWORD: {{ .Values.redis.password | quote }}
         WEED_REDIS_DATABASE: {{ .Values.seaweedfs.filerIndex.redis.db | quote }}
         #WEED_REDIS2_SUPERLARGEDIRECTORIES: '["/"]'
@@ -123,6 +130,7 @@ releases:
 {{- end }}
     s3:
     #  enabled: true
+      imageTag: {{ .Values.versions.images.seaweedfs }}
       replicas: 3
       nodeSelector: ""
       port: {{ .Values.seaweedfs.ports.http.s3 }}
@@ -136,8 +144,8 @@ releases:
         size: 8Ti
       keys:
         admin:
-          accessKey: {{ .Values.seaweedfs.s3.keys.admin.accessKey | quote }}
-          secretKey: {{ .Values.seaweedfs.s3.keys.admin.secretKey | quote }}
+          accessKey: {{ $s3.accessKey | quote }}
+          secretKey: {{ $s3.secretKey | quote }}
   hooks:
   - events: ["postsync"]
     command: "/bin/sh"
@@ -168,7 +176,7 @@ releases:
               command: ['/bin/sh', '-c', 'while true; do sleep 86400; done']
       EOF
       until kubectl -n {{ .Values.namespaces.storage }} wait --for condition=available deploy ${MC_NAME}; do sleep 1; done 2>/dev/null
-      kubectl -n {{ .Values.namespaces.storage }} exec -ti $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -ex <<'EOF'
+      kubectl -n {{ .Values.namespaces.storage }} exec -i $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -ex <<'EOF'
       until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done
       mc config host add seaweedfs http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}
       for i in {{ .Values.thanosObjstoreConfig.bucket }} {{ .Values.harbor.bucket }} {{ .Values.sentry.bucket }} {{ .Values.cortex.buckets.blocks }} {{ .Values.cortex.buckets.notify }} {{ .Values.loki.buckets.chunks }} {{ .Values.loki.buckets.notify }} {{ .Values.patroni.walBucket }} {{ .Values.gitlab.buckets.registry }} {{ .Values.osp.bucket }}; do
@@ -244,6 +252,22 @@ releases:
       dcs:
         enable: false
 {{- end }}
+    extraContainers:
+    - name: ferretdb
+      image: ghcr.io/ferretdb/ferretdb:latest
+      env:
+      #- name: FERRETDB_LISTEN_UNIX
+      #- name: FERRETDB_LISTEN_TLS{,_{CA,CERT,KEY}_FILE}
+      - name: FERRETDB_LISTEN_ADDR
+        value: ":27017"
+      - name: FERRETDB_POSTGRESQL_URL
+        value: "postgres://{{ .Values.ferretdb.user }}:{{ .Values.ferretdb.pass }}@{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432/{{ .Values.ferretdb.name }}"
+      - name: FERRETDB_TELEMETRY
+        value: disable
+      #args: ["--listen-addr=:27017", "--telemetry=disable", "--postgresql-url=postgres://{{ .Values.ferretdb.user }}:{{ .Values.ferretdb.pass }}@{{ .Values.releases.patroni }}.{{ .Values.namespaces.storage }}.svc:5432/{{ .Values.ferretdb.name }}"]
+    extraSvcPorts:
+    - name: mongodb
+      port: 27017
     spiloConfiguration:
       bootstrap:
         dcs:
@@ -318,6 +342,9 @@ releases:
     - name: {{ .Values.zulip.db.name | quote }}
       user: {{ .Values.zulip.db.user | quote }}
       pass: {{ .Values.zulip.db.pass | quote }}
+    - name: {{ .Values.ferretdb.name | quote }}
+      user: {{ .Values.ferretdb.user | quote }}
+      pass: {{ .Values.ferretdb.pass | quote }}
 {{- if .Values.seaweedfs.filerIndex.postgresql.enabled }}
     - name: {{ .Values.seaweedfs.postgresql.name | quote }}
       user: {{ .Values.seaweedfs.postgresql.user | quote }}
@@ -329,9 +356,9 @@ releases:
   #chart: scylla/scylla-operator
   chart: "{{ .Values.chartBases.scylla }}/scylla-operator"
   installed: {{ .Values.enables.storage }}
-  needs:
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   hooks:
   - events: ["postsync"]
@@ -343,8 +370,6 @@ releases:
       sleep 30
   values:
   - fullnameOverride: "{{ .Values.releases.cassandra }}-operator"
-    psp:
-      enabled: true
     scyllaClusters:
     - name: {{ .Values.releases.cassandra }}
       namespace: {{ .Values.namespaces.storage }}
@@ -360,7 +385,7 @@ releases:
       serviceMonitor:  # parameterize
         create: false
       racks:
-      - {}
+      - members: 2
 
 - name: {{ .Values.releases.cassandra }}-manager
   namespace: {{ .Values.namespaces.storage }}
@@ -371,7 +396,7 @@ releases:
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: "{{ .Values.releases.cassandra }}-manager"
@@ -400,7 +425,7 @@ releases:
   needs:
   - {{ .Values.namespaces.storage }}/{{ .Values.releases.cassandra }}-operator
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.cassandra }}
@@ -416,46 +441,31 @@ releases:
 
 - name: {{ .Values.releases.redis }}
   namespace: {{ .Values.namespaces.storage }}
-  chart: dandy-developer/redis-ha
+  chart: enapter/keydb
   installed: {{ .Values.enables.storage }}
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #needs:
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - fullnameOverride: {{ .Values.releases.redis | quote }}
-    hardAntiAffinity: false
-    replicas: {{ .Values.redis.replicas.redis }}
-    image:
-      tag: {{ .Values.versions.images.redis }}
-    haproxy:  # required for harbor-jobservice to do proper init, but also generally a decent idea
-      enabled: true
-      replicas: {{ .Values.redis.replicas.haproxy }}
-      stickyBalancing: true
-      hardAntiAffinity: false
-      readOnly:
-        enabled: true
-        port: {{ .Values.redis.ports.readonly }}
-      metrics:
-        enabled: true
-      image:
-        tag: {{ .Values.versions.images.redisHaproxy }}
-    redis:
-      port: {{ .Values.redis.ports.readwrite }}
-      config:
-        databases: {{ .Values.redis.databaseCount }}
-    sentinel:
-      port: {{ .Values.redis.ports.sentinel }}
+    #imageTag: alpine_x86_64_v6.3.2
+    imageTag: x86_64_v6.3.2
+    nodes: {{ .Values.redis.replicas.redis }}
+    password: {{ .Values.redis.password }}
+    port: {{ .Values.redis.ports.readwrite }}
+    configExtraArgs:
+    - databases: {{ .Values.redis.databaseCount }}
+    #loadBalancer:
+    #  enabled: true
     exporter:
       enabled: true
-      tag: alpine
+      imageTag: alpine
       extraArgs:  # ??
-        ping-on-connect: true
-        redis-only-metrics: true
-      serviceMonitor:
-        enabled: true
-    auth: true
-    redisPassword: {{ .Values.redis.password }}
+      - ping-on-connect: true
+      - redis-only-metrics: true
+    #serviceMonitor:
+    #  enabled: true
 
 - name: {{ .Values.releases.kafka }}
   namespace: {{ .Values.namespaces.storage }}
@@ -473,6 +483,7 @@ releases:
           address: "0.0.0.0"
         rpc_server:
           address: "0.0.0.0"
+
 {{/*
 - name: swift
   namespace: {{ .Values.namespaces.storage }}
@@ -480,8 +491,8 @@ releases:
   installed: false
   chart: "{{ .Values.chartBases.swift }}/swift"
 {{- if ne .Values.k8sRuntime "k3d" }}
-  #needs:
-  #- {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
+  needs:
+  - {{ .Values.namespaces.storage }}/{{ .Values.releases.openebs }}
 {{- end }}
   values:
   - debug: true

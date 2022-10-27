@@ -1,9 +1,19 @@
 HELM_BIN="$(command -v "${HELM:=helm}")"
-DEFAULT_PROXY_REGISTRIES=(ghcr.io k8s.gcr.io gcr.io quay.io "registry.opensource.zalan.do")
+DEFAULT_PROXY_REGISTRIES=(
+  ghcr.io
+  #registry.k8s.io
+  k8s.gcr.io
+  gcr.io
+  quay.io
+  "registry.opensource.zalan.do"
+  registry.gitlab.com
+  gitlab.com
+)
 REGISTRY_PROXY_REPO="${REGISTRY_PROXY_REPO:="rpardini/docker-registry-proxy:0.6.4"}"
 KUBE_NOPROXY_SETTING=(
   '.cluster.local' '.svc'
-#  '192.168.0.0/16' '172.16.0.0/12' '10.0.0.0/8'
+  '127.0.0.0/8' 'localhost'
+  '10.0.0.0/8' '172.16.0.0/12' '192.168.0.0/16'
 )
 
 [ "${SCRIPT_DEBUG:=1}" -eq 0 ] && set -x && export KUBEDEE_DEBUG=1
@@ -92,6 +102,9 @@ registry_proxy_post::kubedee(){
   ## might not be possible to migrate this to lxd
   # lxc-to-lxd --rsync-args '-zz' --containers a1
   # lxc delete -f a1
+
+  local registry_proxy_dns="$(lxc network get "kd-int-$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")" ipv4.address)"
+  REGISTRY_PROXY_DOCKER_ARGS+=('--dns' "${registry_proxy_dns%/*}")
 
   registry_proxy_post::shared "${TMP_CA}"
 

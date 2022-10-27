@@ -55,53 +55,59 @@ releases:
 versions:
   charts:
     etcd: {{ default "8.3.0" (env "CHART_VERSION_ETCD") }}
-    externalSecrets: {{ default "0.5.7" (env "CHART_VERSION_EXTERNAL_SECRETS") }}
-    grafana: {{ default "5.8.16" (env "CHART_VERSION_GRAFANA") }}
-    harbor: {{ default "1.9.2" (env "CHART_VERSION_HARBOR") }}
+    externalSecrets: {{ default "0.7.2" (env "CHART_VERSION_EXTERNAL_SECRETS") }}
+    grafana: {{ default "6.40.4" (env "CHART_VERSION_GRAFANA") }}
+    harbor: {{ default "1.11.0" (env "CHART_VERSION_HARBOR") }}
     jaegerOperator: {{ default "2.25.0" (env "CHART_VERSION_JAEGER_OPERATOR") }}
     kafka: {{ default "11.8.9" (env "CHART_VERSION_KAFKA") }}
     #kubePromStack: {{ default "9.4.10" (env "CHART_VERSION_KUBE_PROM_STACK") }}
     memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
     nginx: {{ default "0.0.0-edge" (env "CHART_VERSION_NGINX") }}
     openebs: {{ default "2.11.0" (env "CHART_VERSION_OPENEBS") }}
-    opensearch: {{ default "2.1.0" (env "CHART_VERSION_OPENSEARCH") }}
+    opensearch: {{ default "2.10.0" (env "CHART_VERSION_OPENSEARCH") }}
+    opensearchDashboards: {{ default "2.8.0" (env "CHART_VERSION_OPENSEARCH_DASHBOARDS") }}
     openfaas: {{ default "9.0.0" (env "CHART_VERSION_OPENFAAS") }}
     prometheus: {{ default "11.16.9" (env "CHART_VERSION_PROMETHEUS") }}
-    vault: {{ default "0.19.0" (env "CHART_VERSION_VAULT") }}
+    sentry: {{ default "17.0.0" (env "CHART_VERSION_SENTRY") }}
+    vault: {{ default "0.23.0" (env "CHART_VERSION_VAULT") }}
   images:
-    certManager: {{ default "1.8.2" (env "VERSIONS_CERT_MANAGER") }}
+    certManager: {{ default "1.11.0" (env "VERSIONS_CERT_MANAGER") }}
     clickhouse: {{ default "20.8.9.6" (env "VERSIONS_CLICKHOUSE") }}
-    cortex: {{ default "1.11.0" (env "VERSIONS_CORTEX") }}
+    cortex: {{ default "1.14.1" (env "VERSIONS_CORTEX") }}
     etcd: {{ default "3.5.4-debian-11-r6" (env "VERSIONS_ETCD") }}
-    externalSecrets: {{ default "0.5.7" (env "VERSIONS_EXTERNAL_SECRETS") }}
-    grafana: {{ default "9.0.2" (env "VERSIONS_GRAFANA") }}
-    harbor: {{ default "2.5.2" (env "VERSIONS_HARBOR") }}
-    istio: {{ default "1.12.1" (env "VERSIONS_ISTIO") }}
+    externalSecrets: {{ default "0.7.2" (env "VERSIONS_EXTERNAL_SECRETS") }}
+    grafana: {{ default "9.3.6" (env "VERSIONS_GRAFANA") }}
+    harbor: {{ default "2.7.0" (env "VERSIONS_HARBOR") }}
+    istio: {{ default "1.16.1" (env "VERSIONS_ISTIO") }}
     jaeger: {{ default "1.30.0" (env "VERSIONS_JAEGER") }}
-    #jaeger: {{ default "1.35.0" (env "VERSIONS_JAEGER") }}
+    #jaeger: {{ default "1.41.1" (env "VERSIONS_JAEGER") }}
     kiali: {{ default "1.51" (env "VERSIONS_KIALI") }}
     memcached: {{ default "1.6.9-debian-10-r199" (env "VERSIONS_MEMCACHED") }}
     nginx: {{ default "edge-alpine" (env "VERSIONS_NGINX") }}
     openebs: {{ default "2.11.0" (env "VERSIONS_OPENEBS") }}
     openebsNdm: {{ default "1.3.0" (env "VERSIONS_OPENEBS_NDM") }}
     prometheusAdapter: {{ default "0.9.1" (env "VERSIONS_PROMETHEUS_ADAPTER") }}
-    redis: {{ default "6.2.5-alpine" (env "VERSIONS_REDIS") }}
-    redisHaproxy: {{ default "2.4-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
-    redPanda: {{ default "22.1.4" (env "VERSIONS_REDPANDA") }}
-    scyllaAgent: {{ default "2.5.3" (env "VERSIONS_SCYLLA_AGENT") }}
-    scyllaManager: {{ default "2.5.3" (env "VERSIONS_SCYLLA_MANAGER") }}
-    scyllaManagerController: {{ default "2.5.3" (env "VERSIONS_SCYLLA_MANAGER") }}
-    scyllaServer: {{ default "4.5.1" (env "VERSIONS_SCYLLA_SERVER") }}
-    seaweedfs: {{ default "2.80" (env "VERSIONS_SEAWEEDFS") | quote }}
-    sentry: {{ default "22.6.0" (env "VERSIONS_SENTRY") }}
-    thanos: {{ default "0.27.0" (env "VERSIONS_THANOS") }}
-    vault: {{ default "1.11.0" (env "VERSIONS_VAULT") }}
-    zulip: {{ default "5.3-0" (env "VERSIONS_ZULIP") }}
+    promscale: {{ default "0.17.0" (env "VERSIONS_PROMSCALE") }}
+    #redis: {{ default "6.2.7-alpine" (env "VERSIONS_REDIS") }}
+    redis: {{ default "7.0.5-alpine" (env "VERSIONS_REDIS") }}
+    #redisHaproxy: {{ default "2.4-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
+    redisHaproxy: {{ default "2.6-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
+    redPanda: {{ default "22.3.11" (env "VERSIONS_REDPANDA") }}
+    scyllaAgent: {{ default "2.6.5" (env "VERSIONS_SCYLLA_AGENT") }}
+    scyllaManager: {{ default "2.6.5" (env "VERSIONS_SCYLLA_MANAGER") }}
+    scyllaManagerController: {{ default "2.6.5" (env "VERSIONS_SCYLLA_MANAGER") }}
+    scyllaServer: {{ default "5.1.3" (env "VERSIONS_SCYLLA_SERVER") }}
+    seaweedfs: {{ default "v3.40" (env "VERSIONS_SEAWEEDFS") }}
+    sentry: {{ default "23.1.1" (env "VERSIONS_SENTRY") }}
+    thanos: {{ default "0.30.1" (env "VERSIONS_THANOS") }}
+    vault: {{ default "1.12.2" (env "VERSIONS_VAULT") }}
+    vaultK8s: {{ default "1.1.0" (env "VERSIONS_VAULT_K8S") }}
+    zulip: {{ default "6.1-0" (env "VERSIONS_ZULIP") }}
 
 chartBases:
   cortex: "{{ requiredEnv "MYDIR" }}/charts/cortex"
   istio: "{{ requiredEnv "MYDIR" }}/charts/istio/manifests"
-  #promscale: "{{ requiredEnv "MYDIR" }}/charts/promscale/deploy/helm-chart"
+  #promscale: "{{ requiredEnv "MYDIR" }}/charts/promscale/deploy"
   seaweedfs: "{{ requiredEnv "MYDIR" }}/charts/seaweedfs/k8s/helm_charts2"
   sentry: "{{ requiredEnv "MYDIR" }}/charts/sentry"
   #swift: "{{ requiredEnv "MYDIR" }}/charts/sapcc/openstack"
@@ -178,8 +184,9 @@ patroni:
   #image: timescale/timescaledb
   #tag: latest-pg13
   image: docker.io/zer0def/spilo
-  tag: 13-2.1p6-tsl2.7.0-citus
-  #tag: 14-2.1p5-tsl2.7.0-citus
+  tag: 13-2.1p9-tsl2.9.1-citus
+  #tag: 14-2.1p9-tsl2.9.1-citus
+  #tag: 15-2.1p9-tsl2.9.1-citus
 
 rabbitmq:
   password: {{ default "rabbitmq" (env "RMQ_PASSWORD") }}
@@ -330,3 +337,8 @@ zulip:
     name: zulip
     user: zulip
     pass: zulip
+
+ferretdb:
+  name: ferretdb
+  user: ferretdb
+  pass: ferretdb

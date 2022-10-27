@@ -28,10 +28,12 @@ repositories:
   url: https://kubernetes.github.io/ingress-nginx
 - name: prometheus-community  # https://github.com/prometheus-community/helm-charts
   url: "https://prometheus-community.github.io/helm-charts"
-- name: vmware-tanzu
+- name: vmware-tanzu  # https://github.com/vmware-tanzu/helm-charts/tree/main/charts
   url: "https://vmware-tanzu.github.io/helm-charts"
-- name: kedacore
+- name: kedacore  # https://github.com/kedacore/charts
   url: "https://kedacore.github.io/charts"
+- name: robusta  # https://github.com/robusta-dev/robusta/tree/master/helm
+  url: "https://robusta-charts.storage.googleapis.com"
 
 # curiosities
 #
@@ -44,7 +46,7 @@ repositories:
 
 helmDefaults:
   wait: true
-  timeout: {{ .Values.helmTimeout }}
+  timeout: {{ default "86400" .Values.helmTimeout }}
   tillerless: false
   #skipDeps: true
   #createNamespace: true
@@ -92,8 +94,6 @@ releases:
   version: {{ .Values.versions.charts.openebs }}
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
   - fullnameOverride: {{ .Values.releases.openebs | quote }}
-    rbac:
-      pspEnabled: true
     #image:  # hopefully a temporary state of affairs
     #  repository: docker.io/
     analytics:
@@ -313,6 +313,18 @@ releases:
         allowNoneAuthentication: true
         enabled: false
         rootPassword: etcd
+{{/*
+    service:
+      type: NodePort
+    #args:
+    #- --enable-v2
+    #- --enable-v2v3=/v2
+    #- --experimental-enable-v2v3=/v2
+    configuration: |-
+      enable-v2: true
+      #enable-v2v3: /v2
+      experimental-enable-v2v3: /v2
+*/}}
 
 - name: {{ .Values.releases.vault }}
   namespace: {{ .Values.namespaces.storage }}

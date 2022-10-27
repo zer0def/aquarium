@@ -57,9 +57,12 @@
 [submodule "charts/karma"]
 	path = charts/karma
 	url = https://github.com/ibelikov/helm-karma
-[submodule "charts/autoscaler"]
-	path = charts/autoscaler
-	url = https://github.com/kubernetes/autoscaler
 [submodule "shell-operator"]
 	path = shell-operator
 	url = https://github.com/flant/shell-operator
+[submodule "charts/vcluster"]
+	path = charts/vcluster
+	url = https://github.com/loft-sh/vcluster
+[submodule "charts/skydive"]
+	path = charts/skydive
+	url = https://github.com/zer0def/skydive-chart

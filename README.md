@@ -94,17 +94,17 @@ Logical components are split into namespaces according to the following logic:
 - storage:
   - [External-Secrets](https://github.com/external-secrets/external-secrets)
   - [OpenEBS](https://github.com/openebs/openebs) in local volume provisioner mode
-  - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage
+  - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage (MinIO, but sucks less™)
   - [Patroni](https://github.com/zalando/patroni)/[Spilo](https://github.com/zalando/spilo) for PostgreSQL deployment
-  - RedPanda (Kafka, but sucks less)
-  - Redis
-  - Scylla (Cassandra, but sucks less)
+  - [RedPanda](https://github.com/redpanda-data/redpanda) (Kafka, but sucks less™)
+  - [KeyDB](https://github.com/snapchat/keydb) (Redis, but sucks less™)
+  - [Scylla](https://github.com/scylladb/scylladb) (Cassandra, but sucks less™)
 - network/service mesh: [Istio](https://github.com/istio/istio)
 - monitoring:
   - [Loki](https://github.com/grafana/loki)
   - [OpenSearch](https://github.com/opensearch-project/OpenSearch)
   - [Prometheus-Operator](https://github.com/coreos/prometheus-operator) with [Thanos](https://github.com/thanos-io/thanos) or [Cortex](https://github.com/cortexproject/cortex)
-- serverless: [OpenFAAS](https://docs.openfaas.com/), possibly [Kubeless](https://github.com/kubeless/kubeless)
+- serverless: [OpenFAAS](https://docs.openfaas.com/), possibly [Fission](https://github.com/fission/fission)
 - development:
   - [GitLab](https://gitlab.com/gitlab-org/gitlab)
   - [Harbor](https://github.com/goharbor/harbor) for cluster-local registry
@@ -115,7 +115,6 @@ Logical components are split into namespaces according to the following logic:
 
 - Kata's available only through Kubedee
 - Kubedee: Registry proxy not deployed as an LXD container, making Docker a harder dependency than it genuinely needs to be
-- cluster-wide pod security policies are just awful
 - most likely inconsistent whitespace handling, deal with it
 
 ## Legalese
