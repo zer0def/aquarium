@@ -88,7 +88,7 @@ releases:
         selector:
           matchLabels:
             app: harbor-scanner-anchore
-        replicas: 1
+        replicas: 3
         template:
           metadata:
             labels:
@@ -258,7 +258,7 @@ releases:
   values:
   - sentry:
       worker:
-        replicas: 1
+        replicas: 3
     images:
       sentry:
         tag: {{ .Values.versions.images.sentry }}
@@ -321,7 +321,7 @@ releases:
     snuba:
 {{- range (list "api" "dbInitJob" "migrateJob" "consumer" "replacer" "outcomesConsumer" "sessionsConsumer" "transactionsConsumer" "cleanupErrors" "cleanupTransactions") }}
       {{ . }}:
-        replicas: 1
+        replicas: 3
         env:
         - name: CLICKHOUSE_PORT
           value: {{ $.Values.clickhouse.tcpPort | quote }}
@@ -340,36 +340,34 @@ releases:
 # - https://docs.openfaas.com/
 # - https://github.com/openfaas/faas-netes/blob/master/chart/openfaas/README.md
 - name: openfaas
-  namespace: {{ .Values.namespaces.serverless }}
+  namespace: faas
   chart: openfaas/openfaas
   version: {{ .Values.versions.charts.openfaas }}
-  installed: {{ .Values.enables.serverless }}
+  installed: true
   #installed: false
-{{- if .Values.enables.serverless }}
   hooks:
   - events: ["presync"]
     command: "/bin/sh"
     args:
     - "-xec"
     - |
-      kubectl get ns {{ .Values.namespaces.serverlessFunctions }} || kubectl create ns {{ .Values.namespaces.serverlessFunctions }}
-      kubectl annotate ns {{ .Values.namespaces.serverlessFunctions }} openfaas="1"
+      kubectl get ns faas-functions || kubectl create ns faas-functions
+      kubectl annotate ns faas-functions openfaas="1"
   - events: ["postsync"]
     command: "/bin/sh"
     args:
     - "-xec"
     - |
   {{- if .Values.enables.network }}
-      kubectl label ns {{ .Values.namespaces.serverlessFunctions }} istio-injection=enabled
+      kubectl label ns faas-functions istio-injection=enabled
   {{- end }}
-  {{- if .Values.enables.serverless }}
       until kubectl wait --for condition=established crd/profiles.openfaas.com; do sleep 1; done 2>/dev/null ||:
       kubectl apply -f- <<EOF
       kind: Profile
       apiVersion: openfaas.com/v1
       metadata:
         name: runc
-        namespace: {{ .Values.namespaces.serverlessFunctions }}
+        namespace: faas-functions
       spec:
         runtimeClassName: runc
       ---
@@ -377,7 +375,7 @@ releases:
       apiVersion: openfaas.com/v1
       metadata:
         name: kata-qemu
-        namespace: {{ .Values.namespaces.serverlessFunctions }}
+        namespace: faas-functions
       spec:
         runtimeClassName: kata-qemu
       ---
@@ -385,7 +383,7 @@ releases:
       apiVersion: openfaas.com/v1
       metadata:
         name: kata-fc
-        namespace: {{ .Values.namespaces.serverlessFunctions }}
+        namespace: faas-functions
       spec:
         runtimeClassName: kata-fc
       ---
@@ -393,14 +391,12 @@ releases:
       apiVersion: openfaas.com/v1
       metadata:
         name: kata-clh
-        namespace: {{ .Values.namespaces.serverlessFunctions }}
+        namespace: faas-functions
       spec:
         runtimeClassName: kata-clh
       EOF
-  {{- end }}
-{{- end }}
   values:
-  - functionNamespace: {{ .Values.namespaces.serverlessFunctions }}
+  - functionNamespace: faas-functions
     clusterRole: true
     openfaasPRO: false
     generateBasicAuth: true
@@ -422,10 +418,16 @@ releases:
 
 # ref: https://github.com/fission/fission/tree/master/charts
 - name: fission
-  namespace: {{ .Values.namespaces.serverless }}
+  namespace: fission
   chart: fission/fission-all
-  #installed: {{ .Values.enables.serverless }}
   installed: false
+  hooks:
+  - events: ["presync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      for i in build func; do kubectl get ns "fission-${i}" || kubectl create ns "fission-${i}"; done
   values:
   - functionNamespace: fission-func
     builderNamespace: fission-build
@@ -512,15 +514,15 @@ releases:
       install: false
     gitlab:
       gitlab-shell:
-        minReplicas: 1
+        minReplicas: 3
       kas:
-        minReplicas: 1
+        minReplicas: 3
       webservice:
-        minReplicas: 1
+        minReplicas: 3
     registry:
       bucket: {{ .Values.gitlab.buckets.registry }}
       hpa:
-        minReplicas: 1
+        minReplicas: 3
     gitlab-runner:
       install: false
       runners:
@@ -531,7 +533,7 @@ releases:
     # ref: https://gitlab.com/gitlab-org/charts/gitlab/-/issues/2067
     nginx-ingress:
       controller:
-        replicaCount: 1
+        replicaCount: 3
         service:
           type: NodePort
           #nodePorts:
@@ -553,7 +555,7 @@ releases:
         configureCertmanager: false
         tls:
           enabled: false
-    # /ref: https://gitlab.com/gitlab-org/charts/gitlab/-/issues/2067
+      # ref: https://gitlab.com/gitlab-org/charts/gitlab/-/issues/2067
       edition: ce
       grafana:
         enabled: false

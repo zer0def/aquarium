@@ -4,6 +4,8 @@
 
 Aquarium's design goal is to leverage Docker (using k3s/k3d) or LXD (using proper Kubernetes through Kubedee) to provide a comparatively lightweight scaffold for launching multi-node Kubernetes development environments on your local machine, while trying to address some of a pain points of doing so.
 
+Most notably, this project tries really hard to avoid using operators where they're not necessary, as they usually serve as means to upsell the user on a product, while funnelling away from otherwise perfectly available configuration options and into each respective party's walled garden to gauge for.
+
 ### Usage
 
 ```
@@ -94,11 +96,11 @@ Logical components are split into namespaces according to the following logic:
 - storage:
   - [External-Secrets](https://github.com/external-secrets/external-secrets)
   - [OpenEBS](https://github.com/openebs/openebs) in local volume provisioner mode
-  - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage (MinIO, but sucks less™)
+  - [SeaweedFS](https://github.com/chrislu/seaweedfs) for object storage (MinIO replacement)
   - [Patroni](https://github.com/zalando/patroni)/[Spilo](https://github.com/zalando/spilo) for PostgreSQL deployment
-  - [RedPanda](https://github.com/redpanda-data/redpanda) (Kafka, but sucks less™)
-  - [KeyDB](https://github.com/snapchat/keydb) (Redis, but sucks less™)
-  - [Scylla](https://github.com/scylladb/scylladb) (Cassandra, but sucks less™)
+  - [RedPanda](https://github.com/redpanda-data/redpanda) (Kafka replacement)
+  - [KeyDB](https://github.com/snapchat/keydb) (Redis replacement)
+  - [Scylla](https://github.com/scylladb/scylladb) (Cassandra replacement)
 - network/service mesh: [Istio](https://github.com/istio/istio)
 - monitoring:
   - [Loki](https://github.com/grafana/loki)

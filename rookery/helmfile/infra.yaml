@@ -3,7 +3,7 @@ bases:
 ---
 helmDefaults:
   wait: true
-  timeout: {{ .Values.helmTimeout }}
+  timeout: {{ default "86400" .Values.helmTimeout }}
   tillerless: false
   #skipDeps: true
   #createNamespace: true
@@ -139,12 +139,12 @@ templates:
       images:
         pull_policy: "Always"
         tags:
-          bootstrap: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          db_drop: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          db_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_user: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_endpoints: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_service: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          bootstrap: {{ .Values.registry }}/heat:{{ $osTag }}
+          db_drop: {{ .Values.registry }}/heat:{{ $osTag }}
+          db_init: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_user: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_endpoints: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_service: {{ .Values.registry }}/heat:{{ $osTag }}
           nginx: docker.io/nginx:1.18
       network:
 {{- range $ingressSvc := list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
@@ -180,11 +180,11 @@ releases:
 - name: memcached
   namespace: {{ .Values.openstack.namespace }}
   chart: bitnami/memcached
-  version: {{ .Values.versions.charts.memcached }}
+  #version: {{ .Values.versions.charts.memcached }}
   labels:
     purpose: dependency
   needs:
-  - openebs/openebs
+  - "{{ .Values.openebs.namespace }}/openebs"
   values:
   - fullnameOverride: {{ .Values.memcachedCluster }}
     replicaCount: {{ default 1 (env "MEMCACHED_COUNT") }}
@@ -196,11 +196,11 @@ releases:
 - name: patroni
   namespace: {{ .Values.openstack.namespace }}
   #installed: false
-  chart: "{{ requiredEnv "MYDIR" }}/../charts/zer0def/incubator/patroni"
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/zer0def/patroni"
   labels:
     purpose: dependency
   needs:
-  - openebs/openebs
+  - "{{ .Values.openebs.namespace }}/openebs"
   values:
   - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
     replicaCount: {{ .Values.patroni.replicas }}
@@ -274,7 +274,7 @@ releases:
   labels:
     purpose: dependency
   needs:
-  - openebs/openebs
+  - "{{ .Values.openebs.namespace }}/openebs"
   values:
   - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
     replicaCount: {{ default 1 (env "RDBMS_COUNT") }}
@@ -294,7 +294,7 @@ releases:
   labels:
     purpose: dependency
   needs:
-  - openebs/openebs
+  - "{{ .Values.openebs.namespace }}/openebs"
   values:
   - fullnameOverride: {{ $.Values.credentials.database.root.host | quote }}
     root:
@@ -311,11 +311,12 @@ releases:
   labels:
     purpose: dependency
   needs:
-  - openebs/openebs
+  - "{{ .Values.openebs.namespace }}/openebs"
   values:
   - pod:
       replicas:
         server: {{ $.Values.openstack.rmq.replicas }}
+    pod_management_policy: OrderedReady
     labels:
       jobs:
         <<: *openstackControlNodeSelector
@@ -325,6 +326,13 @@ releases:
         <<: *openstackControlNodeSelector
     volume:
       class_name: openebs-hostpath
+{{/*
+    hostAliases:
+    - hostnames:
+      - kubernetes.default.svc.cluster.local
+      - kubernetes.default.svc
+      ip: {{ .Values.kubeApiIp }}
+*/}}
     network:
       management:
         ingress:
@@ -384,8 +392,8 @@ releases:
     args:
     - "-xec"
     - |
-      until kubectl -n {{ .Values.openstack.namespace }} wait --for condition=ready pod -l app.kubernetes.io/instance=rabbitmq; do :; done
-      until kubectl -n {{ .Values.openstack.namespace }} exec -ti rabbitmq-0 -- rabbitmqctl set_user_tags {{ $.Values.credentials.rabbitmq.root.user }} management administrator; do :; done
+      until kubectl -n {{ $.Values.openstack.namespace }} wait --for condition=ready pod -l app.kubernetes.io/instance=rabbitmq; do :; done
+      until kubectl -n {{ $.Values.openstack.namespace }} exec -ti rabbitmq-0 -- rabbitmqctl set_user_tags {{ $.Values.credentials.rabbitmq.root.user }} management administrator; do :; done
 */}}
 
 - name: ceph-openstack-config
@@ -401,7 +409,7 @@ releases:
     command: "/bin/sh"
     args:
     - "-xec"
-    - "until kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-admin-keyring; do sleep 1; done"
+    - "until kubectl -n {{ .Values.rook.namespace }} get secret/rook-ceph-admin-keyring; do sleep 1; done"
   values:
   - labels:
       job:
@@ -413,8 +421,11 @@ releases:
     #  job_namespace_client_ceph_config: false
     endpoints:
       ceph_mon:
+        #ports:
+        #  mon:
+        #    default: 3300
         hosts:
-          #default: {{ .Values.rook.namespace }}-mon-a
+          #default: rook-ceph-mon-a
           default: ceph-mon
           discovery:
             rook_cluster: {{ .Values.rook.namespace }}
@@ -435,18 +446,30 @@ releases:
       csi_rbd:
         parameters:
           provision_storage_class: false
-          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretName: "rook-ceph-admin-keyring"
           adminSecretNamespace: {{ .Values.rook.namespace }}
       cephfs:
         parameters:
           provision_storage_class: false
-          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretName: "rook-ceph-admin-keyring"
           adminSecretNamespace: {{ .Values.rook.namespace }}
       rbd:
         parameters:
           provision_storage_class: false
-          adminSecretName: "{{ .Values.rook.namespace }}-admin-keyring"
+          adminSecretName: "rook-ceph-admin-keyring"
           adminSecretNamespace: {{ .Values.rook.namespace }}
+    conf:
+      ceph:
+        "client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}":  # is this a mistake? might require fixes in relation to nova user, tho
+          "rbd default data pool": "{{ .Values.ceph.pools.cinderVolume }}{{ .Values.ceph.osEcPoolSuffix }}"
+        "client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}":
+          "rbd default data pool": "{{ .Values.ceph.pools.cinderBackup }}{{ .Values.ceph.osEcPoolSuffix }}"
+        "client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}":
+          "rbd default data pool": "{{ .Values.ceph.pools.glance }}{{ .Values.ceph.osEcPoolSuffix }}"
+        "client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}":
+          "rbd default data pool": "{{ .Values.ceph.pools.gnocchi }}{{ .Values.ceph.osEcPoolSuffix }}"
+        "client.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.nova }}":
+          "rbd default data pool": "{{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}"
 
 - name: openvswitch
   namespace: {{ .Values.openstack.namespace }}
@@ -476,7 +499,7 @@ releases:
   - images:
       pull_policy: "Always"
       tags:
-        libvirt: {{ .Values.registry }}/openstack/libvirt:{{ $osTag }}
+        libvirt: {{ .Values.registry }}/libvirt:{{ $osTag }}
     labels:
       agent:
         libvirt:

@@ -3,7 +3,7 @@ bases:
 ---
 helmDefaults:
   wait: true
-  timeout: {{ .Values.helmTimeout }}
+  timeout: {{ default "86400" .Values.helmTimeout }}
   tillerless: false
   #skipDeps: true
   #createNamespace: true
@@ -11,12 +11,16 @@ helmDefaults:
 
 repositories:
 - name: nginx  # src: https://github.com/nginxinc/kubernetes-ingress/tree/master/deployments/helm-chart
-  url: "https://helm.nginx.com/edge"
-  #url: "https://helm.nginx.com/stable"
+  #url: "https://helm.nginx.com/edge"
+  url: "https://helm.nginx.com/stable"
 - name: jetstack  # cert-manager
   url: "https://charts.jetstack.io"
 - name: openebs
   url: "https://openebs.github.io/charts"
+- name: hashicorp  # https://github.com/hashicorp/vault-helm
+  url: "https://helm.releases.hashicorp.com"
+- name: mkhpalm  # https://github.com/mkhpalm/helm-charts
+  url: "https://mkhpalm.github.io/helm-charts"
 
 templates:
   openebs:
@@ -31,7 +35,7 @@ templates:
 
 releases:
 - name: openebs
-  namespace: openebs
+  namespace: {{ .Values.openebs.namespace }}
   chart: openebs/openebs
   version: {{ .Values.versions.charts.openebs }}
   values:  # ref: https://openebs.github.io/charts/openebs-lite-helm-values.yaml
@@ -130,9 +134,9 @@ releases:
       EOF
 
 - name: cert-manager
-  namespace: kube-system
+  namespace: {{ .Values.certManager.namespace }}
   chart: jetstack/cert-manager
-  version: v1.3.1
+  version: v{{ .Values.versions.images.certManager }}
   labels:
     purpose: ingress
   values:
@@ -147,10 +151,10 @@ releases:
     args:
     - "-xec"
     - |
-      until kubectl -n kube-system wait --for condition=ready pod -l app.kubernetes.io/instance=cert-manager,app.kubernetes.io/component=webhook; do sleep 1; done ||:
+      until kubectl -n {{ .Values.certManager.namespace }} wait --for condition=ready pod -l app.kubernetes.io/instance=cert-manager,app.kubernetes.io/component=webhook; do sleep 1; done ||:
       until [ $(kubectl get validatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
       until [ $(kubectl get mutatingwebhookconfigurations cert-manager-webhook -o jsonpath='{.webhooks[*].clientConfig.caBundle}' | wc -c) -gt 1 ]; do sleep 1; done
-      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}') -- wget https://cert-manager-webhook.kube-system.svc &>/dev/null; do sleep 1; done
+      #until kubectl -n kube-system exec -ti $(kubectl -n kube-system get pod -l app=flannel -o jsonpath='{.items[0].metadata.name}') -- wget https://cert-manager-webhook.{{ .Values.certManager.namespace }}.svc &>/dev/null; do sleep 1; done
       kubectl get ns {{ .Values.openstack.namespace }} || kubectl create ns {{ .Values.openstack.namespace }}
       kubectl apply -f- <<EOF
       apiVersion: cert-manager.io/v1
@@ -201,5 +205,92 @@ releases:
       setAsDefaultIngress: true
       #watchNamespace: {{ .Values.openstack.namespace }}
   chart: nginx/nginx-ingress
-  version: 0.0.0-edge
+  version: 0.16.2
+  #version: 0.0.0-edge
   #chart: kubernetes-nginx/ingress-nginx
+
+- name: etcd
+  namespace: {{ .Values.etcd.namespace }}
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/mkhpalm/charts/etcd"
+  needs:
+  - "{{ .Values.openebs.namespace }}/openebs"
+  values:
+  - replicas: 3
+    image:
+      tag: "v{{ .Values.versions.images.etcd }}"
+    persistentVolume:
+      enabled: true
+      storage: 1Gi
+    extraEnv:
+    - name: ETCD_QUOTA_BACKEND_BYTES
+      value: "8589934592"
+    #autoCompactionMode: periodic
+    - name: ETCD_AUTO_COMPACTION_MODE
+      value: periodic
+    #autoCompactionRetention: 1
+    - name: ETCD_AUTO_COMPACTION_RETENTION
+      value: "1"
+    auth:
+      peer:
+        secureTransport: false
+        enableAuthentication: false
+      client:
+        secureTransport: false
+        enableAuthentication: false
+
+- name: vault
+  namespace: {{ .Values.vault.namespace }}
+  chart: hashicorp/vault
+  needs:
+  - "{{ .Values.etcd.namespace }}/etcd"
+  values:
+  - injector:
+      agentImage:
+        tag: {{ .Values.versions.images.vault }}
+    server:
+      affinity: ""
+      image:
+        tag: {{ .Values.versions.images.vault }}
+      auditStorage:
+        enabled: true
+      ha:
+        enabled: true
+        config: |
+          ui = true
+          listener "tcp" {
+            tls_disable = 1
+            address = "[::]:8200"
+            cluster_address = "[::]:8201"
+          }
+          storage "etcd" {
+            address = "http://etcd-client.{{ .Values.etcd.namespace }}.svc:2379"
+            path = "vault/"
+            ha_enabled = "true"
+            etcd_api = "v3"
+          }
+          service_registration "kubernetes" {}
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      until kubectl -n {{ .Values.vault.namespace }} exec -i vault-0 -- echo; do sleep 1; done 2>/dev/null ||:
+      TMPFILE="$(mktemp)"
+      [ "$(kubectl -n {{ .Values.vault.namespace }} exec -i vault-0 -- vault status | awk '/^Initialized / {print $NF}')" = "false" ] || exit 0
+      until kubectl -n {{ .Values.vault.namespace }} exec -i vault-0 -- vault operator init >"${TMPFILE}"; do sleep 3; done
+
+      for i in $(seq 0 2); do
+        awk '/Unseal Key/ {print $NF}' "${TMPFILE}" | xargs -n1 -- kubectl -n {{ .Values.vault.namespace }} exec -i "vault-${i}" -- vault operator unseal
+      done
+
+      kubectl apply -f- <<EOF
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        namespace: {{ .Values.vault.namespace }}
+        name: vault-root-token
+      stringData:
+        token: "$(awk '/Initial Root Token/ {print $NF}' "${TMPFILE}")"
+      EOF
+      rm "${TMPFILE}"

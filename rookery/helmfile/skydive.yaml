@@ -1,0 +1,145 @@
+bases:
+- "{{ requiredEnv "MYDIR" }}/helmfile/envs.yaml"
+---
+helmDefaults:
+  wait: true
+  timeout: {{ default "86400" .Values.helmTimeout }}
+  tillerless: false
+  #skipDeps: true
+  #createNamespace: true
+  #cleanupOnFail: true
+
+repositories:
+- name: opensearch  # https://github.com/opensearch-project/helm-charts
+  url: "https://opensearch-project.github.io/helm-charts"
+
+{{- $redisPassword := "asdfasdf" }}
+{{- $s3 := dict "endpoint" "seaweedfs-s3.skydive.svc:8333" "accessKey" "AKIAIOSFODNN7EXAMPLE" "secretKey" "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" }}
+
+releases:
+# default u:p → admin:admin
+# default tls on, requires `play.ws.ssl.loose.acceptAnyCertificate = true` in cerebro
+- name: opensearch
+  namespace: skydive
+  chart: opensearch/opensearch
+  needs:
+  - "{{ .Values.openebs.namespace }}/openebs"
+  hooks:
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - "-xec"
+    - |
+      kubectl -n skydive run cerebro --image lmenezes/cerebro:0.9.4
+  values:
+  - majorVersion: 2
+    podManagementPolicy: OrderedReady
+    extraInitContainers:
+    - name: sysctl
+      securityContext:
+        runAsUser: 0
+        privileged: true
+      image: "alpine:edge"
+      command: ["sysctl", "-w", "vm.max_map_count=262144"]
+    securityConfig:
+      enabled: false
+    config:
+      opensearch.yml: |
+        cluster.name: opensearch-cluster
+        network.host: 0.0.0.0
+        compatibility.override_main_response_version: true  # report ES OSS version, not OpenSsearch version
+        plugins.security.disabled: true
+
+## doesn't interface well for some reason?
+# default u:p → admin:admin
+- name: opensearch-dashboards
+  namespace: skydive
+  chart: opensearch/opensearch-dashboards
+  needs:
+  - skydive/opensearch
+  values:
+  - service:
+      type: NodePort
+    config:
+      opensearch_dashboards.yml: |
+        server:
+          host: "0.0.0.0"
+        opensearch:  # server-side
+          hosts:
+          - "http://opensearch-cluster-master-headless.skydive.svc:9200"
+        #plugins.security.disabled: true
+
+- name: redis
+  namespace: skydive
+  chart: enapter/keydb
+  needs:
+  - "{{ .Values.openebs.namespace }}/openebs"
+  values:
+  - fullnameOverride: redis
+    #imageTag: alpine_x86_64_v6.3.2
+    imageTag: x86_64_v6.3.2
+    nodes: 3
+    password: {{ $redisPassword }}
+    port: 6379
+    #configExtraArgs:
+    #- databases: 32
+    exporter:
+      enabled: true
+      imageTag: alpine
+      extraArgs:  # ??
+      - ping-on-connect: true
+      - redis-only-metrics: true
+
+- name: skydive
+  namespace: skydive
+  chart: "{{ requiredEnv "MYDIR" }}/../charts/skydive"
+  installed: false
+  needs:
+  #- rook-ceph/rook-operator
+  - skydive/opensearch
+  values:
+  - agent:
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+    flowExporter:
+      enabled: true
+      store:
+        bucket: skydive
+      write:
+        s3:
+          endpoint: {{ $s3.endpoint | quote }}
+          region: us-east-1
+          access_key: {{ $s3.accessKey | quote }}
+          secret_key: {{ $s3.secretKey | quote }}
+    analyzer:
+      replicas: 1
+      elasticsearch:
+        enabled: true
+        host: opensearch-cluster-master-headless.skydive.svc
+        port: 9200
+      env:
+      - name: SKYDIVE_UI
+        value: '{"theme":"dark","k8s_enabled":"true"}'
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHFLOW_DEBUG
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHFLOW_SSL_INSECURE
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHFLOW_TOTAL_FIELDS_LIMIT
+        value: "2000"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHTOPOLOGY_DEBUG
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHTOPOLOGY_SSL_INSECURE
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHTOPOLOGY_TOTAL_FIELDS_LIMIT
+        value: "2000"
+{{/*
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHFLOW_DISABLE_HEALTHCHECK
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHFLOW_DISABLE_SNIFFING
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHTOPOLOGY_DISABLE_HEALTHCHECK
+        value: "true"
+      - name: SKYDIVE_STORAGE_ELASTICSEARCHTOPOLOGY_DISABLE_SNIFFING
+        value: "true"
+*/}}

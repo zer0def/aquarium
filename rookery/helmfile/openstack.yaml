@@ -3,7 +3,7 @@ bases:
 ---
 helmDefaults:
   wait: true
-  timeout: {{ .Values.helmTimeout }}
+  timeout: {{ default "86400" .Values.helmTimeout }}
   tillerless: false
   #skipDeps: true
   #createNamespace: true
@@ -50,7 +50,7 @@ templates:
 {{- end }}
       endpoints:
 {{/*
-{{- if .Values.openstack.tls.enabled }}
+{{- if $.Values.openstack.tls.enabled }}
         identity:
           auth:
   {{- range (list "admin" "cinder" "glance" "heat" "heat_trustee" "heat_stack_user" "neutron" "nova" "placement" "ceilometer" "aodh" "barbican" "octavia" "designate" "magnum" "senlin" "test" }}
@@ -85,8 +85,8 @@ templates:
               password: {{ $.Values.credentials.database.root.pass | quote }}
               secret:
                 tls:
-{{- if .Values.openstack.tls.enabled }}
-                  internal: {{ .Values.openstack.tls.secrets.database }}
+{{- if $.Values.openstack.tls.enabled }}
+                  internal: {{ $.Values.openstack.tls.secrets.database }}
 {{- else }}
                   internal: ""
 {{- end }}
@@ -137,16 +137,16 @@ templates:
       images:
         pull_policy: "Always"
         tags:
-          bootstrap: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          db_drop: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          db_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_user: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_endpoints: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-          ks_service: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+          bootstrap: {{ .Values.registry }}/heat:{{ $osTag }}
+          db_drop: {{ .Values.registry }}/heat:{{ $osTag }}
+          db_init: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_user: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_endpoints: {{ .Values.registry }}/heat:{{ $osTag }}
+          ks_service: {{ .Values.registry }}/heat:{{ $osTag }}
           nginx: docker.io/nginx:1.18
       network:
-{{- range $ingressSvc := list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
-        {{ $ingressSvc }}:
+{{- range  list "api" "cfn" "cloudwatch" "dashboard" "metadata" "novncproxy" "osapi" "placement" "registry" "server"}}
+        {{ . }}:
           ingress:
             annotations:
               nginx.org/client-max-body-size: "0"
@@ -181,7 +181,7 @@ releases:
   labels:
     app: openstack
   needs:
-  - kube-system/cert-manager
+  - {{ .Values.certManager.namespace }}/cert-manager
   - {{ .Values.ingress.namespace }}/nginx
   - {{ .Values.openstack.namespace }}/memcached
   - {{ .Values.openstack.namespace }}/rabbitmq
@@ -190,18 +190,42 @@ releases:
   - {{ .Values.openstack.namespace }}/mysql
   hooks:
   - *helmToolkitDependencyFixup
+  - events: ["postsync"]
+    command: "/bin/sh"
+    args:
+    - -xc
+    - |
+      OS_CLIENT_POD=os-client
+      kubectl -n {{ .Values.openstack.namespace }} run "${OS_CLIENT_POD}" --image={{ .Values.registry }}/heat:{{ $osTag }} -- sleep infinity; until kubectl -n {{ .Values.openstack.namespace }} wait --for condition=ready pod "${OS_CLIENT_POD}"; do sleep 3; done &>/dev/null
+      kubectl -n {{ .Values.openstack.namespace }} get secret/keystone-keystone-admin -o json | jq -r '.data|to_entries[]|"export \(.key)=\(.value|@base64d)"' | kubectl -n {{ .Values.openstack.namespace }} exec -i "${OS_CLIENT_POD}" -- tee /root/.openrc &>/dev/null
+      MYCIDR="$(lxc network get "kd-ext-$(cat "${HOME}/.local/share/kubedee/clusters/rookery/network_id")" ipv4.address)"
+      kubectl -n {{ .Values.openstack.namespace }} exec -i "${OS_CLIENT_POD}" -- tee /root/os-setup.sh <<EOF >/dev/null
+      #!/bin/bash
+      . /root/.openrc
+      openstack --insecure network create --project "admin" --share --description "Provider Network - shared and external" --external --provider-network-type "flat" --provider-physical-network "{{ .Values.openstack.neutron.extBridge.network }}" provider
+      openstack --insecure subnet create --project "admin" --network provider --subnet-range "${MYCIDR%.*}.0/${MYCIDR#*/}" --allocation-pool "start=${MYCIDR%.*}.2,end=${MYCIDR%.*}.254" --dns-nameserver "1.1.1.1" --gateway "${MYCIDR%/*}" provider_subnet
+
+      # Create public network and subnet
+      openstack --insecure network create --project "admin" --share --description "Public Network - shared" public
+      openstack --insecure subnet create --project "admin" --network public --subnet-range "10.133.37.0/24" --allocation-pool start=10.133.37.2,end=10.133.37.254 --dns-nameserver "1.1.1.1" --gateway "10.133.37.1" public_subnet
+
+      # Create public-ns-router
+      openstack --insecure router create --project "admin" --description "Public North-South Router" public-ns-router
+      openstack --insecure router set --external-gateway provider public-ns-router
+      openstack --insecure router add subnet public-ns-router public_subnet
+      EOF
   values:
   - *openstackCommon
   - images:
       tags:
-        keystone_api: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_credential_cleanup: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        keystone_db_sync: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_domain_manage: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_credential_rotate: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_credential_setup: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_fernet_rotate: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
-        keystone_fernet_setup: {{ .Values.registry }}/openstack/keystone:{{ $osTag }}
+        keystone_api: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_credential_cleanup: {{ .Values.registry }}/heat:{{ $osTag }}
+        keystone_db_sync: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_domain_manage: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_credential_rotate: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_credential_setup: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_fernet_rotate: {{ .Values.registry }}/keystone:{{ $osTag }}
+        keystone_fernet_setup: {{ .Values.registry }}/keystone:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -215,6 +239,7 @@ releases:
     pod:
       replicas:
         api: 1
+    helm3_hook: false
 {{- if .Values.openstack.tls.enabled }}
     endpoints:
       identity:
@@ -236,7 +261,8 @@ releases:
       tls:
         identity:
           api:
-            public: keystone-tls
+            #public: keystone-tls
+            public: keystone-tls-public
             internal: keystone-tls
 {{- end }}
 
@@ -255,7 +281,8 @@ releases:
     args:
     - "-xec"
     - |
-      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.glance }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)"
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)" ]; do sleep 1; done
+      kubectl -n "{{ .Values.openstack.namespace }}" get secret/{{ .Values.ceph.keyringSecrets.glance }} || kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.glance }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }} }' | base64 -dw0)"
   values:
   - *openstackCommon
 {{- if .Values.openstack.tls.enabled }}
@@ -268,7 +295,7 @@ releases:
           https_ca_certificates_file: /etc/glance/certs/ca.crt
           swift_store_cacert: /etc/glance/certs/ca.crt
           rbd_store_pool: {{ .Values.ceph.pools.glance }}
-          rbd_store_user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}
+          rbd_store_user: "{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}"
       glance_registry:
         keystone_authtoken:
           cafile: /etc/glance/certs/ca.crt
@@ -304,11 +331,13 @@ releases:
       tls:
         image:
           api:
-            public: glance-api-tls
+            #public: glance-api-tls
+            public: glance-api-tls-public
             internal: glance-api-tls
         image_registry:
           api:
-            public: glance-registry-tls
+            #public: glance-registry-tls
+            public: glance-registry-tls-public
             internal: glance-registry-tls
     #network:
     #  api:
@@ -321,23 +350,194 @@ releases:
     #        nginx.org/ssl-services: "glance-registry"
 {{- end }}
   - storage: rbd
+    bootstrap:
+      structured:
+        images:  # https://docs.openstack.org/image-guide/obtain-images.html
+{{ range $release, $archs := dict "0.6.1" (list "aarch64" "arm" "ppc64le" "x86_64") }}{{ range $archs }}
+          "00-cirros-{{ $release }}-{{ . }}":
+            id: null
+            name: "cirros-{{ $release }}-{{ . }}"
+            source_url: "http://download.cirros-cloud.net/{{ $release }}/"
+            image_file: "cirros-{{ $release }}-{{ . }}-disk.img"
+            min_disk: 1
+            image_type: qcow2
+            container_format: bare
+            properties:
+              architecture: {{ . }}
+              hw_boot_menu: "true"
+              #hw_vif_model: virtio
+              #hw_vif_multiqueue_enabled: "true"
+              #hw_watchdog_action: none
+              os_admin_user: cirros
+              os_distro: cirros
+              os_type: linux
+              os_version: {{ $release | quote }}
+{{ end }}{{ end }}
+{{ range list "xena" "yoga" }}
+          amphora-{{ . }}-amd64:
+            id: null
+            source_url: "https://minio.services.osism.tech/openstack-octavia-amphora-image/"
+            name: "amphora-{{ . }}-amd64"
+            image_file: "octavia-amphora-haproxy-{{ . }}.qcow2"
+            min_disk: 2
+            min_ram: 1024
+            image_type: qcow2
+            container_format: bare
+            tag: {{ $.Values.openstack.octavia.amphora.image_tag | quote }}
+            properties:  # https://docs.openstack.org/glance/latest/admin/useful-image-properties.html
+              architecture: x86_64
+              #hw_disk_bus: scsi
+              #hw_scsi_model: virtio-scsi
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: ubuntu
+              os_distro: ubuntu
+              os_type: linux
+              os_version: "20.04"
+{{ end }}
+          archlinux-amd64:
+            id: null
+            name: "archlinux-amd64"
+            source_url: "https://geo.mirror.pkgbuild.com/images/latest/"
+            image_file: "Arch-Linux-x86_64-cloudimg.qcow2"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:  # https://docs.openstack.org/glance/latest/admin/useful-image-properties.html
+              architecture: x86_64
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: arch
+              os_distro: arch
+              os_type: linux
+{{/*
+{{ range $release, $archs := dict "6" (list "x86_64") }}{{ range $archs }}
+          "centos-{{ $release }}-{{ . }}":  # https://cloud.centos.org/centos/
+            id: null
+            name: "centos-{{ $release }}-{{ . }}"
+            source_url: "http://cloud.centos.org/centos/{{ $release }}/images/"
+            image_file: "CentOS-{{ $release }}-{{ . }}-GenericCloud.qcow2"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:
+              architecture: {{ . }}
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: centos
+              os_distro: centos
+              os_type: linux
+              os_version: {{ $release | quote }}
+{{ end }}{{ end }}
+*/}}
+          cirros: null
+{{ range $release, $archs := dict "9" (list "amd64" "arm64") "10" (list "amd64" "arm64") }}{{ range $archs }}
+          "debian-{{ $release }}-{{ . }}":
+            id: null
+            name: "debian-{{ $release }}-{{ . }}"
+            source_url: "http://cdimage.debian.org/cdimage/openstack/current-{{ $release }}/"
+            image_file: "debian-{{ $release }}-openstack-{{ . }}.qcow2"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:
+              #architecture: {{ . }}
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: debian
+              os_distro: debian
+              os_type: linux
+              os_version: {{ $release | quote }}
+{{ end }}{{ end }}
+{{/*
+{{ range $release, $archs := dict "6" (list "x86_64") }}{{ range $archs }}
+          "opensuse-{{ $release }}-{{ . }}":  # https://get.opensuse.org/tumbleweed/
+            id: null
+            name: "opensuse-{{ $release }}-{{ . }}"
+            source_url: "??"
+            image_file: "??"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:
+              #architecture: ??
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: opensuse
+              os_distro: opensuse
+              os_type: linux
+              os_version: ??
+{{ end }}{{ end }}
+*/}}
+{{ range $release, $archs := dict "14.04" (list "amd64" "arm64" "armhf" "i386" "ppc64el") "16.04" (list "amd64" "arm64" "armhf" "i386" "powerpc" "ppc64el" "s390x") }}{{ range $archs }}
+          "ubuntu-{{ $release }}-{{ . }}":
+            id: null
+            name: "ubuntu-{{ $release }}-{{ . }}"
+            source_url: "https://cloud-images.ubuntu.com/releases/{{ $release }}/release/"
+            image_file: "ubuntu-{{ $release }}-server-cloudimg-{{ . }}-disk1.img"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:
+              #architecture: {{ . }}
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: ubuntu
+              os_distro: ubuntu
+              os_type: linux
+              os_version: {{ $release | quote }}
+{{ end }}{{ end }}
+{{ range $release, $archs := dict "18.04" (list "amd64" "arm64" "armhf" "i386" "ppc64el" "s390x") "20.04" (list "amd64" "arm64" "armhf" "ppc64el" "s390x") "22.04" (list "amd64" "arm64" "armhf" "ppc64el" "riscv64" "s390x") }}{{ range $archs }}
+          "ubuntu-{{ $release }}-{{ . }}":
+            id: null
+            name: "ubuntu-{{ $release }}-{{ . }}"
+            source_url: "https://cloud-images.ubuntu.com/releases/{{ $release }}/release/"
+            image_file: "ubuntu-{{ $release }}-server-cloudimg-{{ . }}.img"
+            min_disk: 8
+            image_type: qcow2
+            container_format: bare
+            properties:
+              #architecture: {{ . }}
+              hw_boot_menu: "true"
+              hw_vif_model: virtio
+              hw_vif_multiqueue_enabled: "true"
+              hw_watchdog_action: none
+              os_admin_user: ubuntu
+              os_distro: ubuntu
+              os_type: linux
+              os_version: {{ $release | quote }}
+{{ end }}{{ end }}
     ceph_client:
       user_secret_name: {{ .Values.ceph.keyringSecrets.admin }}
     conf:
       glance:
         DEFAULT:
           bind_host: 0.0.0.0
+          workers: 4
         glance_store:
           rbd_store_replication: 2
           # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
-          rbd_store_crush_rule: {{ .Values.rook.replicaPool }}
+          #rbd_store_crush_rule: {{ .Values.rook.replicaPool }}
+          rbd_store_crush_rule: replicated_rule
+          rbd_thin_provisioning: true
     images:
       tags:
-        glance_api: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
-        glance_db_sync: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
-        glance_metadefs_load: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
-        glance_registry: {{ .Values.registry }}/openstack/glance:{{ $osTag }}
-        glance_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+        glance_api: {{ .Values.registry }}/glance:{{ $osTag }}
+        glance_db_sync: {{ .Values.registry }}/glance:{{ $osTag }}
+        glance_metadefs_load: {{ .Values.registry }}/glance:{{ $osTag }}
+        glance_registry: {{ .Values.registry }}/glance:{{ $osTag }}
+        glance_storage_init: {{ .Values.registry }}/ceph-config-helper:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -360,12 +560,24 @@ releases:
           annotations:
             nginx.org/rewrites: "serviceName=glance-registry rewrite=/"
             #nginx.org/websocket-services: glance-registry
-    #manifests:
-    #  deployment_registry: true
-    #  ingress_registry: true
-    #  pdb_registry: true
-    #  service_ingress_registry: true
-    #  service_registry: true
+    helm3_hook: false
+    manifests:
+      # disable storage initialization, as we're creating it ourselves, so that erasure-coded pools work
+      job_storage_init: false
+      # image registry deprecation due to fold into api
+      #deployment_registry: true
+      #ingress_registry: true
+      #pdb_registry: true
+      #service_ingress_registry: true
+      #service_registry: true
+    dependencies:
+      static:
+        api:
+          jobs:
+          - glance-db-sync
+          - glance-rabbit-init
+          - glance-ks-user
+          - glance-ks-endpoints
 
 - name: cinder
   namespace: {{ .Values.openstack.namespace }}
@@ -382,30 +594,36 @@ releases:
     args:
     - "-xec"
     - |
-      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderVolume }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)"
-      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderBackup }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)"
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)" ]; do sleep 1; done;
+      kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderVolume }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }} }' | base64 -dw0)"
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)" ]; do sleep 1; done
+      kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.cinderBackup }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }} }' | base64 -dw0)"
   values:
   - *openstackCommon
   - storage: ceph
     conf:
       backends:
         rbd1:
-          rbd_pool: {{ .Values.ceph.pools.cinderVolume }}
-          rbd_user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+          rbd_pool: {{ .Values.ceph.pools.cinderVolume | quote }}
+          rbd_user: "{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}"
+{{/*
       ceph:
         pools:
           {{ .Values.ceph.pools.cinderBackup }}:
             replication: 2
             # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
-            crush_rule: {{ .Values.rook.replicaPool }}
+            #crush_rule: {{ .Values.rook.replicaPool }}
+            crush_rule: replicated_rule
             chunk_size: 8
             app_name: cinder-backup
           {{ .Values.ceph.pools.cinderVolume }}:
             replication: 2
             # adopt OSD failure domain CRUSH rule from the `replicapool` block pool
-            crush_rule: {{ .Values.rook.replicaPool }}
+            #crush_rule: {{ .Values.rook.replicaPool }}
+            crush_rule: replicated_rule
             chunk_size: 8
             app_name: cinder-volume
+*/}}
       cinder:
         DEFAULT:
           backup_driver: "cinder.backup.drivers.ceph.CephBackupDriver"
@@ -416,14 +634,14 @@ releases:
           backend_url: "postgresql://{{ $.Values.credentials.database.cinder.user }}:{{ $.Values.credentials.database.cinder.pass }}@{{ $.Values.credentials.database.root.host }}/cinder"
     images:
       tags:
-        cinder_api: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_db_sync: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
-        cinder_scheduler: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_volume: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_volume_usage_audit: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_backup: {{ .Values.registry }}/openstack/cinder:{{ $osTag }}
-        cinder_backup_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+        cinder_api: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_db_sync: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_storage_init: {{ .Values.registry }}/ceph-config-helper:{{ $osTag }}
+        cinder_scheduler: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_volume: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_volume_usage_audit: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_backup: {{ .Values.registry }}/cinder:{{ $osTag }}
+        cinder_backup_storage_init: {{ .Values.registry }}/ceph-config-helper:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -454,9 +672,23 @@ releases:
                 add:
                 - CAP_AUDIT_WRITE
     manifests:
+      # disable storage initialization, as we're creating it ourselves, so that erasure-coded pools work
+      job_backup_storage_init: false
+      job_storage_init: false
       network_policy: true
+    dependencies:
+      static:
+{{- range (list "api" "backup" "scheduler" "volume" "volume_usage_audit") }}
+        {{ . }}:
+          jobs:
+          - cinder-db-sync
+          - cinder-ks-user
+          - cinder-ks-endpoints
+          - cinder-rabbit-init
+{{- end }}
     ceph_client:
       user_secret_name: {{ .Values.ceph.keyringSecrets.admin }}
+    helm3_hook: false
     secrets:
       rbd:
         backup: {{ .Values.ceph.keyringSecrets.cinderBackup }}
@@ -477,56 +709,15 @@ releases:
       #    a2dismod: null
     secrets:
       tls:
+        #volumev3:
         volume:
           api:
-            public: cinder-v3-tls
+            #public: cinder-v3-tls
+            public: cinder-v3-tls-public
             internal: cinder-v3-tls
     endpoints:
+      #volumev3:
       volume:
-        hosts:
-          default: cinder-api
-        scheme:
-          default: http
-        port:
-          api:
-            default: 8776
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: cinder-v1-tls
-              dnsNames:
-              - "cinder"
-              - "cinder.{{ .Values.openstack.namespace }}"
-              - "cinder.{{ .Values.openstack.namespace }}.svc"
-              - "cinder.{{ .Values.openstack.namespace }}.svc.cluster.local"
-              - "cinder-api"
-              - "cinder-api.{{ .Values.openstack.namespace }}"
-              - "cinder-api.{{ .Values.openstack.namespace }}.svc"
-              - "cinder-api.{{ .Values.openstack.namespace }}.svc.cluster.local"
-      volumev2:
-        hosts:
-          default: cinder-api
-        scheme:
-          default: http
-        port:
-          api:
-            default: 8776
-        host_fqdn_override:
-          default:
-            tls:
-              <<: *openstackCAIssuer
-              secretName: cinder-v2-tls
-              dnsNames:
-              - "cinder"
-              - "cinder.{{ .Values.openstack.namespace }}"
-              - "cinder.{{ .Values.openstack.namespace }}.svc"
-              - "cinder.{{ .Values.openstack.namespace }}.svc.cluster.local"
-              - "cinder-api"
-              - "cinder-api.{{ .Values.openstack.namespace }}"
-              - "cinder-api.{{ .Values.openstack.namespace }}.svc"
-              - "cinder-api.{{ .Values.openstack.namespace }}.svc.cluster.local"
-      volumev3:
         hosts:
           default: cinder-api
         scheme:
@@ -626,22 +817,24 @@ releases:
       tls:
         orchestration:
           api:
-            public: heat-api-tls
+            #public: heat-api-tls
+            public: heat-api-tls-public
             internal: heat-api-tls
         cloudformation:
           cfn:
-            public: heat-cfn-tls
+            #public: heat-cfn-tls
+            public: heat-cfn-tls-public
             internal: heat-cfn-tls
 {{- end }}
   - images:
       tags:
-        heat_api: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_cfn: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_cloudwatch: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_db_sync: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_engine: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_engine_cleaner: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        heat_purge_deleted: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
+        heat_api: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_cfn: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_cloudwatch: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_db_sync: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_engine: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_engine_cleaner: {{ .Values.registry }}/heat:{{ $osTag }}
+        heat_purge_deleted: {{ .Values.registry }}/heat:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -659,6 +852,7 @@ releases:
         cfn: 1
         cloudwatch: 1
         engine: 1
+    helm3_hook: false
     network:
       api:
         ingress:
@@ -683,70 +877,16 @@ releases:
   - {{ .Values.openstack.namespace }}/keystone
   hooks:
   - *helmToolkitDependencyFixup
-  - events: ["postsync"]
-    command: "/bin/sh"
-    args:
-    - "-xec"
-    - |
-      kubectl apply -f- <<EOF
-      apiVersion: apps/v1
-      kind: DaemonSet
-      metadata:
-        name: neutron-ovs-gateway-setup
-        namespace: {{ .Values.openstack.namespace }}
-      spec:
-        selector:
-          matchLabels:
-            app: neutron-ovs-gateway-setup
-        template:
-          metadata:
-            labels:
-              app: neutron-ovs-gateway-setup
-          spec:
-            hostNetwork: true
-            nodeSelector:
-              {{ $.Values.openstack.nodeSelectors.neutronOvs.node_selector_key | quote }}: {{ $.Values.openstack.nodeSelectors.neutronOvs.node_selector_value | quote }}
-            volumes:
-            - name: lib-modules
-              hostPath:
-                path: /lib/modules
-            - name: iptables-lockfile
-              hostPath:
-                path: /run/xtables.lock
-            - name: run-netns
-              hostPath:
-                path: /run/netns
-            containers:
-            - name: gateway-setup
-              image: "alpine:edge"
-              securityContext:
-                capabilities:
-                  add:
-                  - CAP_NET_ADMIN
-              volumeMounts:
-              - name: lib-modules
-                mountPath: /lib/modules
-                readOnly: true
-              - name: iptables-lockfile
-                mountPath: /run/xtables.lock
-              command:
-              - "/bin/sh"
-              - "-xec"
-              - |
-                apk add --no-cache iptables
-                ip addr change {{ $.Values.openstack.neutron.extBridge.addr }} dev {{ $.Values.openstack.neutron.extBridge.name }}
-                ip link set {{ $.Values.openstack.neutron.extBridge.name }} up
-                iptables -t nat -C POSTROUTING -s {{ $.Values.openstack.neutron.extBridge.cidr }} -o {{ $.Values.openstack.neutron.extBridge.iface }} -j MASQUERADE || iptables -t nat -A POSTROUTING -s {{ $.Values.openstack.neutron.extBridge.cidr }} -o {{ $.Values.openstack.neutron.extBridge.iface }} -j MASQUERADE
-      EOF
   values:
   - *openstackCommon
 {{- if .Values.openstack.tls.enabled }}
-  #- "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/neutron/values_overrides/tls.yaml"
-  - "{{ requiredEnv "MYDIR" }}/nginx-void.yaml"
+  - "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/neutron/values_overrides/tls.yaml"  # testing
+  #- "{{ requiredEnv "MYDIR" }}/nginx-void.yaml"
   - conf:
       neutron:
         DEFAULT:
-          bind_host: 0.0.0.0
+          bind_host: 127.0.0.1
+        #  bind_host: 0.0.0.0
         nova:
           cafile: /etc/neutron/certs/ca.crt
         keystone_authtoken:
@@ -757,11 +897,11 @@ releases:
           nova_metadata_port: 443
           nova_metadata_protocol: https
     endpoints:
+      identity:
+        scheme: http
       network:
         hosts:
           default: neutron-server
-        scheme:
-          default: http
         port:
           api:
             default: 9696
@@ -770,6 +910,10 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: neutron-tls
+      oslo_messaging:
+        port:
+          https:
+            default: 15672
     #network:
     #  server:
     #    ingress:
@@ -782,22 +926,23 @@ releases:
             internal: nova-metadata-tls
         network:
           server:
-            public: neutron-tls
+            #public: neutron-tls
+            public: neutron-tls-public
             internal: neutron-tls
 {{- end }}
   - images:
       tags:
-        neutron_db_sync: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_server: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_dhcp: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_metadata: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_l3: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_l2gw: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_openvswitch_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_linuxbridge_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_bagpipe_bgp: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_ironic_agent: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
-        neutron_netns_cleanup_cron: {{ .Values.registry }}/openstack/neutron:{{ $osTag }}
+        neutron_db_sync: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_server: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_dhcp: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_metadata: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_l3: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_l2gw: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_openvswitch_agent: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_linuxbridge_agent: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_bagpipe_bgp: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_ironic_agent: {{ .Values.registry }}/neutron:{{ $osTag }}
+        neutron_netns_cleanup_cron: {{ .Values.registry }}/neutron:{{ $osTag }}
     labels:
       agent:
         dhcp:
@@ -825,8 +970,8 @@ releases:
       bagpipe_bgp:
         <<: *openstackComputeNodeSelector
     network:
-      interface:
-        tunnel: {{ $.Values.openstack.neutron.extBridge.iface }}
+      #interface:
+      #  tunnel: {{ $.Values.openstack.neutron.extBridge.iface }}
       server:
         ingress:
           annotations:
@@ -836,9 +981,9 @@ releases:
       neutron:
         DEFAULT:
           l3_ha: False
-          max_l3_agents_per_router: 1
+          max_l3_agents_per_router: 2
           l3_ha_network_type: vxlan
-          dhcp_agents_per_network: 1
+          dhcp_agents_per_network: 2
       plugins:
         ml2_conf:
           ml2_type_flat:
@@ -860,6 +1005,8 @@ releases:
           apply-to: all
           # only pattern changed
           pattern: '^(?!amq\.).*'
+      auto_bridge_add:
+        {{ .Values.openstack.neutron.extBridge.name }}: {{ .Values.openstack.neutron.extBridge.iface }}
     resources:
       enabled: true
     pod:
@@ -872,6 +1019,7 @@ releases:
         neutron_agent: false
     manifests:
       daemonset_sriov_agent: false
+    helm3_hook: false  # circular dependency server → job
 
 {{- $cephKeyring := printf "%s-%s" .Values.openstack.namespace .Values.ceph.keyringSecrets.cinderVolume }}
 - name: nova
@@ -956,6 +1104,19 @@ releases:
             tls:
               <<: *openstackCAIssuer
               secretName: nova-novncproxy-tls
+      compute_serial_proxy:
+        hosts:
+          default: nova-serialproxy
+        scheme:
+          default: http
+        port:
+          serial_proxy:
+            default: 6084
+        host_fqdn_override:
+          default:
+            tls:
+              <<: *openstackCAIssuer
+              secretName: nova-serialproxy-tls
       compute_spice_proxy:  # just to pad out certificate creation?
         hosts:
           default: nova-spiceproxy
@@ -986,23 +1147,33 @@ releases:
       tls:
         compute:
           osapi:
-            public: nova-api-tls
+            #public: nova-api-tls
+            public: nova-api-tls-public
             internal: nova-api-tls
         compute_metadata:
           metadata:
-            public: nova-metadata-tls
+            #public: nova-metadata-tls
+            public: nova-metadata-tls-public
             internal: nova-metadata-tls
         compute_novnc_proxy:
           novncproxy:
-            public: nova-novncproxy-tls
+            #public: nova-novncproxy-tls
+            public: nova-novncproxy-tls-public
             internal: nova-novncproxy-tls
+        compute_serial_proxy:
+          serialproxy:
+            #public: nova-serialproxy-tls
+            public: nova-serialproxy-tls-public
+            internal: nova-serialproxy-tls
         compute_spice_proxy:
           spiceproxy:
-            public: nova-spiceproxy-tls
+            #public: nova-spiceproxy-tls
+            public: nova-spiceproxy-tls-public
             internal: nova-spiceproxy-tls
         #placement:
         #  placement:
-        #    public: nova-placement-tls
+        #    #public: nova-placement-tls
+        #    public: nova-placement-tls-public
         #    internal: nova-placement-tls
     #network:
     #  osapi:
@@ -1024,23 +1195,25 @@ releases:
 {{- end }}
   - images:
       tags:
-        nova_api: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_cell_setup: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_cell_setup_init: {{ .Values.registry }}/openstack/heat:{{ $osTag }}
-        nova_compute: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_api: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_cell_setup: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_cell_setup_init: {{ .Values.registry }}/heat:{{ $osTag }}
+        nova_compute: {{ .Values.registry }}/nova:{{ $osTag }}
         nova_compute_ironic: docker.io/kolla/ubuntu-source-nova-compute-ironic:{{ .Values.openstack.version }}
-        nova_compute_ssh: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_conductor: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_consoleauth: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_db_sync: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_novncproxy: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_compute_ssh: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_conductor: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_consoleauth: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_db_sync: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_novncproxy: {{ .Values.registry }}/nova:{{ $osTag }}
         #nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:{{ .Values.openstack.version }}
         nova_novncproxy_assets: docker.io/kolla/ubuntu-source-nova-novncproxy:wallaby
-        nova_placement: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_scheduler: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_service_cleaner: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
-        nova_spiceproxy: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
-        nova_spiceproxy_assets: {{ .Values.registry }}/openstack/nova:{{ $osTag }}
+        nova_placement: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_scheduler: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_serialproxy: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_serialproxy_assets: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_service_cleaner: {{ .Values.registry }}/ceph-config-helper:{{ $osTag }}
+        nova_spiceproxy: {{ .Values.registry }}/nova:{{ $osTag }}
+        nova_spiceproxy_assets: {{ .Values.registry }}/nova:{{ $osTag }}
     labels:
       agent:
         compute:
@@ -1063,8 +1236,11 @@ releases:
         <<: *openstackControlNodeSelector
       scheduler:
         <<: *openstackControlNodeSelector
+      serialproxy:
+        <<: *openstackControlNodeSelector
       spiceproxy:
         <<: *openstackControlNodeSelector
+    helm3_hook: false  # circular dependency api ↔ job
     network:
       osapi:
         ingress:
@@ -1079,6 +1255,21 @@ releases:
           annotations:
             nginx.org/rewrites: "serviceName=nova-novncproxy rewrite=/"
             nginx.org/websocket-services: nova-novncproxy
+            ingress.kubernetes.io/ssl-redirect: "False"  # insecure, I know
+      serialproxy:
+        node_port:
+          enabled: false
+          port: 30684
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-serialproxy rewrite=/"
+            nginx.org/websocket-services: nova-serialproxy
+            ingress.kubernetes.io/ssl-redirect: "False"  # insecure, I know
+      spiceproxy:
+        ingress:
+          annotations:
+            nginx.org/rewrites: "serviceName=nova-spiceproxy rewrite=/"
+            nginx.org/websocket-services: nova-spiceproxy
             ingress.kubernetes.io/ssl-redirect: "False"  # insecure, I know
       #placement:
       #  ingress:
@@ -1136,16 +1327,44 @@ releases:
         conductor: 1
         scheduler: 1
         novncproxy: 1
+        serialproxy: 1
+        #spiceproxy: 1
       use_fqdn:
         compute: false
     bootstrap:
       structured:
         flavors:
           options:
-{{- range list "m1_tiny" "m1_small" "m1_medium" "m1_large" "m1_xlarge" }}
-            {{ . }}:
-              id: {{ . }}
-{{- end }}
+            m1_tiny:
+              id: "m1_tiny"
+              name: "m1.tiny"
+              ram: 512
+              disk: 8
+              vcpus: 1
+            m1_small:
+              id: "m1_small"
+              name: "m1.small"
+              ram: 2048
+              disk: 20
+              vcpus: 1
+            m1_medium:
+              id: "m1_medium"
+              name: "m1.medium"
+              ram: 4096
+              disk: 40
+              vcpus: 2
+            m1_large:
+              id: "m1_large"
+              name: "m1.large"
+              ram: 8192
+              disk: 80
+              vcpus: 4
+            m1_xlarge:
+              id: "m1_xlarge"
+              name: "m1.xlarge"
+              ram: 16384
+              disk: 160
+              vcpus: 8
     conf:
       enable_iscsi: true
       ceph:
@@ -1153,6 +1372,7 @@ releases:
           secret_uuid: {{ .Values.ceph.libvirtUUID }}
           user: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
           keyring: {{ exec "/bin/sh" (list "-ec" (printf "until kubectl -n %s get secret/%s-client-%s &>/dev/null; do sleep 1; done; kubectl -n %s get secret/%s-client-%s -o jsonpath='{.data.%s}' | base64 -dw0" .Values.rook.namespace .Values.rook.namespace $cephKeyring .Values.rook.namespace .Values.rook.namespace $cephKeyring $cephKeyring)) | quote }}
+          ecpool: "{{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}"
       rabbitmq:
         policies:
         - vhost: "nova"
@@ -1221,14 +1441,15 @@ releases:
       tls:
         placement:
           api:
-            public: placement-tls
+            #public: placement-tls
+            public: placement-tls-public
             internal: placement-tls
 {{- end }}
   - images:
       tags:
         db_migrate: quay.io/airshipit/porthole-postgresql-utility:latest-{{ .Values.openstack.baseImage }}
-        placement: {{ .Values.registry }}/openstack/placement:{{ $osTag }}
-        placement_db_sync: {{ .Values.registry }}/openstack/placement:{{ $osTag }}
+        placement: {{ .Values.registry }}/placement:{{ $osTag }}
+        placement_db_sync: {{ .Values.registry }}/placement:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1242,10 +1463,12 @@ releases:
     pod:
       replicas:
         api: 1
+    helm3_hook: false
 
 - name: gnocchi
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm-infra/gnocchi"
+  installed: false  # gnocchi removed from openstack-helm-infra
   labels:
     app: openstack
   needs:
@@ -1257,18 +1480,18 @@ releases:
     args:
     - "-xec"
     - |
-      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/{{ .Values.rook.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.gnocchi }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)"
+      until [ -n "$(kubectl -n {{ .Values.rook.namespace }} get secret/rook-ceph-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)" ]; do sleep 1; done; kubectl -n "{{ .Values.openstack.namespace }}" create secret generic "{{ .Values.ceph.keyringSecrets.gnocchi }}" --type kubernetes.io/rbd --from-literal key="$(kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.openstack.namespace }}-client-{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}" -o jsonpath='{.data.{{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }} }' | base64 -dw0)"
   values:
   - *openstackCommon
   - images:
       tags:
-        db_sync: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
-        gnocchi_api: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
-        gnocchi_statsd: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
-        gnocchi_metricd: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
-        gnocchi_resources_cleaner: {{ .Values.registry }}/openstack/gnocchi:{{ $osTag }}
+        db_sync: {{ .Values.registry }}/gnocchi:{{ $osTag }}
+        gnocchi_api: {{ .Values.registry }}/gnocchi:{{ $osTag }}
+        gnocchi_statsd: {{ .Values.registry }}/gnocchi:{{ $osTag }}
+        gnocchi_metricd: {{ .Values.registry }}/gnocchi:{{ $osTag }}
+        gnocchi_resources_cleaner: {{ .Values.registry }}/gnocchi:{{ $osTag }}
         db_init_indexer: docker.io/library/postgres:13
-        gnocchi_storage_init: {{ .Values.registry }}/openstack/ceph-config-helper:{{ $osTag }}
+        gnocchi_storage_init: {{ .Values.registry }}/ceph-config-helper:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1290,7 +1513,8 @@ releases:
       tls:
         metric:
           api:
-            public: gnocchi-tls
+            #public: gnocchi-tls
+            public: gnocchi-tls-public
     endpoints:
       metric:
         hosts:
@@ -1344,11 +1568,12 @@ releases:
           root: gnocchi.rest.api.V1Controller
         #pipeline:gnocchiv1+keystone:
         #  pipeline: keystone_authtoken gnocchiv1
+    helm3_hook: false
 
 - name: ceilometer
   namespace: {{ .Values.openstack.namespace }}
   chart: "{{ requiredEnv "MYDIR" }}/../charts/openstack-helm/ceilometer"
-  #installed: false
+  installed: false
   labels:
     app: openstack
   needs:
@@ -1360,13 +1585,13 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        ceilometer_db_sync: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_api: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_central: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_collector: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_compute: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_ipmi: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
-        ceilometer_notification: {{ .Values.registry }}/openstack/ceilometer:{{ $osTag }}
+        ceilometer_db_sync: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_api: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_central: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_collector: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_compute: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_ipmi: {{ .Values.registry }}/ceilometer:{{ $osTag }}
+        ceilometer_notification: {{ .Values.registry }}/ceilometer:{{ $osTag }}
         #db_init_mongodb: docker.io/mongo:4.4.6-bionic
     labels:
       api:
@@ -1388,13 +1613,14 @@ releases:
         ingress:
           annotations:
             nginx.org/rewrites: "serviceName=ceilometer-api rewrite=/"
+    helm3_hook: false
     conf:
       ceilometer:
         DEFAULT:
           debug: "True"
         api:
           aodh_is_enabled: "True"
-          gnocchi_is_enabled: "True"
+          gnocchi_is_enabled: "False"
         database:
           metering_connection: "{{ $.Values.credentials.database.root.scheme }}://{{ $.Values.credentials.database.ceilometer.user }}:{{ $.Values.credentials.database.ceilometer.pass }}@{{ $.Values.credentials.database.root.host }}:{{ $.Values.credentials.database.root.port }}/ceilometer"
           event_connection: "{{ $.Values.credentials.database.root.scheme }}://{{ $.Values.credentials.database.ceilometer.user }}:{{ $.Values.credentials.database.ceilometer.pass }}@{{ $.Values.credentials.database.root.host }}:{{ $.Values.credentials.database.root.port }}/ceilometer"
@@ -1410,7 +1636,8 @@ releases:
         - name: meter_sink
           transformers:
           publishers:
-          - gnocchi://?archive_policy=low
+          - notifier://
+          #- gnocchi://?archive_policy=low
         - name: cpu_sink
           transformers:
           - name: "rate_of_change"
@@ -1422,7 +1649,8 @@ releases:
                 max: 100
                 scale: "100.0 / (10**9 * (resource_metadata.cpu_number or 1))"
           publishers:
-          - gnocchi://?archive_policy=low
+          - notifier://
+          #- gnocchi://?archive_policy=low
         - name: cpu_delta_sink
           transformers:
           - name: "delta"
@@ -1431,7 +1659,8 @@ releases:
                 name: "cpu.delta"
               growth_only: True
           publishers:
-          - gnocchi://?archive_policy=low
+          - notifier://
+          #- gnocchi://?archive_policy=low
         - name: disk_sink
           transformers:
           - name: "rate_of_change"
@@ -1446,7 +1675,8 @@ releases:
                   unit: "\\1/s"
                 type: "gauge"
           publishers:
-          - gnocchi://?archive_policy=low
+          - notifier://
+          #- gnocchi://?archive_policy=low
         - name: network_sink
           transformers:
           - name: "rate_of_change"
@@ -1461,7 +1691,8 @@ releases:
                   unit: "\\1/s"
                 type: "gauge"
           publishers:
-          - gnocchi://?archive_policy=low
+          - notifier://
+          #- gnocchi://?archive_policy=low
     manifests:
       deployment_api: false
       deployment_collector: false
@@ -1509,12 +1740,12 @@ releases:
         scheme: postgresql
     images:
       tags:
-        aodh_db_sync: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
-        aodh_api: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
-        aodh_evaluator: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
-        aodh_listener: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
-        aodh_notifier: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
-        aodh_alarms_cleaner: {{ .Values.registry }}/openstack/aodh:{{ $osTag }}
+        aodh_db_sync: {{ .Values.registry }}/aodh:{{ $osTag }}
+        aodh_api: {{ .Values.registry }}/aodh:{{ $osTag }}
+        aodh_evaluator: {{ .Values.registry }}/aodh:{{ $osTag }}
+        aodh_listener: {{ .Values.registry }}/aodh:{{ $osTag }}
+        aodh_notifier: {{ .Values.registry }}/aodh:{{ $osTag }}
+        aodh_alarms_cleaner: {{ .Values.registry }}/aodh:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1531,6 +1762,7 @@ releases:
         ingress:
           annotations:
             nginx.org/rewrites: "serviceName=aodh-api rewrite=/"
+    helm3_hook: false
 
 - name: barbican
   namespace: {{ .Values.openstack.namespace }}
@@ -1540,7 +1772,7 @@ releases:
     app: openstack
   needs:
   - {{ .Values.openstack.namespace }}/keystone
-  #- {{ .Values.openstack.namespace }}/neutron
+  - {{ .Values.openstack.namespace }}/neutron
   hooks:
   - *helmToolkitDependencyFixup
   values:
@@ -1568,12 +1800,13 @@ releases:
       tls:
         key_manager:
           api:
-            public: barbican-tls
+            #public: barbican-tls
+            public: barbican-tls-public
 {{- end }}
   - images:
       tags:
-        barbican_db_sync: {{ .Values.registry }}/openstack/barbican:{{ $osTag }}
-        barbican_api: {{ .Values.registry }}/openstack/barbican:{{ $osTag }}
+        barbican_db_sync: {{ .Values.registry }}/barbican:{{ $osTag }}
+        barbican_api: {{ .Values.registry }}/barbican:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1587,6 +1820,7 @@ releases:
     pod:
       replicas:
         api: 1
+    helm3_hook: false
 
 - name: octavia
   namespace: {{ .Values.openstack.namespace }}
@@ -1606,6 +1840,20 @@ releases:
       octavia:
         keystone_authtoken:
           cafile: /etc/octavia/certs/ca.crt
+        controller_worker:  # https://docs.openstack.org/octavia/latest/install/install.html
+          amp_image_tag: {{ $.Values.openstack.octavia.amphora.image_tag | quote }}
+{{/*
+          amp_boot_network_list: ??
+          amp_flavor_id: ??
+          amp_image_owner_id: ??
+          amp_secgroup_list: ??
+          amp_ssh_key_name: octavia_ssh_key
+          amp_active_retries: 100
+          amp_active_wait_sec: 2
+          network_driver: allowed_address_pairs_driver
+          compute_driver: compute_nova_driver
+          amphora_driver: amphora_haproxy_rest_driver
+*/}}
     endpoints:
       load_balancer:
         hosts:
@@ -1624,15 +1872,16 @@ releases:
       tls:
         load_balancer:
           api:
-            public: octavia-tls
+            #public: octavia-tls
+            public: octavia-tls-public
 {{- end }}
   - images:
       tags:
-        octavia_db_sync: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
-        octavia_api: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
-        octavia_worker: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
-        octavia_housekeeping: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
-        octavia_health_manager: {{ .Values.registry }}/openstack/octavia:{{ $osTag }}
+        octavia_db_sync: {{ .Values.registry }}/octavia:{{ $osTag }}
+        octavia_api: {{ .Values.registry }}/octavia:{{ $osTag }}
+        octavia_worker: {{ .Values.registry }}/octavia:{{ $osTag }}
+        octavia_housekeeping: {{ .Values.registry }}/octavia:{{ $osTag }}
+        octavia_health_manager: {{ .Values.registry }}/octavia:{{ $osTag }}
         octavia_health_manager_init: docker.io/kolla/ubuntu-source-octavia-health-manager:{{ .Values.openstack.version }}
         openvswitch_vswitchd: docker.io/kolla/centos-source-openvswitch-vswitchd:{{ .Values.openstack.version }}
     labels:
@@ -1658,6 +1907,7 @@ releases:
         housekeeping: 1
     manifests:
       daemonset_health_manager: false
+    helm3_hook: false
 
 - name: designate
   namespace: {{ .Values.openstack.namespace }}
@@ -1695,17 +1945,18 @@ releases:
       tls:
         dns:
           api:
-            public: designate-tls
+            #public: designate-tls
+            public: designate-tls-public
 {{- end }}
   - images:
       tags:
-        designate_api: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_central: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_db_sync: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_mdns: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_producer: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_sink: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
-        designate_worker: {{ .Values.registry }}/openstack/designate:{{ $osTag }}
+        designate_api: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_central: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_db_sync: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_mdns: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_producer: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_sink: {{ .Values.registry }}/designate:{{ $osTag }}
+        designate_worker: {{ .Values.registry }}/designate:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1734,6 +1985,7 @@ releases:
         producer: 1
         sink: 1
         worker: 1
+    helm3_hook: false
 
 - name: magnum
   namespace: {{ .Values.openstack.namespace }}
@@ -1749,9 +2001,9 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        magnum_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
-        magnum_conductor: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
-        magnum_db_sync: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        magnum_api: {{ .Values.registry }}/magnum:{{ $osTag }}
+        magnum_conductor: {{ .Values.registry }}/magnum:{{ $osTag }}
+        magnum_db_sync: {{ .Values.registry }}/magnum:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1759,6 +2011,7 @@ releases:
         <<: *openstackControlNodeSelector
       job:
         <<: *openstackControlNodeSelector
+    helm3_hook: false
 
 - name: senlin
   namespace: {{ .Values.openstack.namespace }}
@@ -1774,10 +2027,10 @@ releases:
   - *openstackCommon
   - images:
       tags:
-        senlin_api: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
-        senlin_db_sync: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
-        senlin_engine: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
-        senlin_engine_cleaner: {{ .Values.registry }}/openstack/magnum:{{ $osTag }}
+        senlin_api: {{ .Values.registry }}/magnum:{{ $osTag }}
+        senlin_db_sync: {{ .Values.registry }}/magnum:{{ $osTag }}
+        senlin_engine: {{ .Values.registry }}/magnum:{{ $osTag }}
+        senlin_engine_cleaner: {{ .Values.registry }}/magnum:{{ $osTag }}
     labels:
       api:
         <<: *openstackControlNodeSelector
@@ -1790,6 +2043,7 @@ releases:
         ingress:
           annotations:
             nginx.org/rewrites: "serviceName=senlin-api rewrite=/"
+    helm3_hook: false
 
 # would love to do manila and trove helm charts some day
 
@@ -1823,13 +2077,14 @@ releases:
       tls:
         dashboard:
           dashboard:
-            public: horizon-tls
+            #public: horizon-tls
+            public: horizon-tls-public
             internal: horizon-tls
 {{- end }}
   - images:
       tags:
-        horizon_db_sync: {{ .Values.registry }}/openstack/horizon:{{ $osTag }}
-        horizon: {{ .Values.registry }}/openstack/horizon:{{ $osTag }}
+        horizon_db_sync: {{ .Values.registry }}/horizon:{{ $osTag }}
+        horizon: {{ .Values.registry }}/horizon:{{ $osTag }}
     labels:
       dashboard:
         <<: *openstackControlNodeSelector
@@ -1843,3 +2098,4 @@ releases:
     pod:
       replicas:
         server: 1
+    helm3_hook: false

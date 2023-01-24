@@ -1,5 +1,6 @@
 helmTimeout: {{ default 86400 (env "HELM_TIMEOUT") }}
-registry: {{ default "kubedee-rookery-registry:5000" (env "LOCAL_REGISTRY_ADDRESS") }}
+#registry: {{ default "kubedee-rookery-registry:5000/openstack" (env "LOCAL_REGISTRY_ADDRESS") }}
+registry: docker.io/zer0def
 memcachedCluster: memcached
 backingStorageClass: openebs-device
 
@@ -136,13 +137,17 @@ credentials:
 
 versions:
   images:
-    ceph: {{ default "16.2.5" (env "CEPH_VERSION") }}
-    openebs: 2.10.0
+    ceph: {{ default "17.2.5" (env "CEPH_VERSION") }}
+    certManager: {{ default "1.11.0" (env "CERT_MANAGER_VERSION") }}
+    etcd: {{ default "3.5.6" (env "VERSIONS_ETCD") }}  # busybox removed afterward
+    openebs: {{ default "3.4.0" (env "OPENEBS_VERSION") }}
+    vault: {{ default "1.13.0" (env "VAULT_VERSION") }}
   charts:
-    mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
     memcached: {{ default "4.2.27" (env "CHART_VERSION_MEMCACHED") }}
-    openebs: {{ default "2.9.0" (env "CHART_VERSION_OPENEBS") }}
-    rook: {{ default "v1.7.4" (env "CHART_VERSION_ROOK") }}
+    openebs: {{ default "3.4.0" (env "CHART_VERSION_OPENEBS") }}
+    rook: {{ default "v1.10.5" (env "CHART_VERSION_ROOK") }}
+
+    mariadb: {{ default "4.4.6" (env "CHART_VERSION_MARIADB") }}
     mysql: {{ default "6.14.12" (env "CHART_VERSION_MYSQL") }}
 
 ingress:
@@ -152,31 +157,40 @@ ingress:
 rook:
   namespace: rook-ceph
   cluster: my-cluster
+  next:
+    namespace: rook-testing
+    cluster: rook-testing
   hostBasedOSDs: true
   # pod CIDR space or host network space if cluster `network.hostNetwork: true`
   network: {{ default "10.244.0.0/16" (env "ROOK_NETWORK") }}
   replicaPool: replicapool
+  provider: multus  # host
   rbd:
     enabled: true
   cephfs:
     # need to disable CephFS, when creating Glance with `storage: rbd`
-    enabled: false
+    enabled: true
     name: myfs
-    # https://github.com/rook/rook/issues/6482#issuecomment-715596792
-    nfs: false
+  nfs:
+    enabled: true
+    namespace: nfs
   object:
-    enabled: false
+    enabled: true
+    realm: rookery
     store:
-      name: my-store
       storageClass: rook-ceph-bucket
+      port: 8088
+      securePort: 8443
 
 ceph:
+  osEcPoolSuffix: -data
   libvirtUUID: 457eb676-33da-42ec-9a8c-9293d545c337
   pools:
     glance: images
     cinderVolume: volumes
     cinderVolumeExt: volumes-ext
     cinderBackup: backups
+    cinderBackupExt: backups-ext
     gnocchi: metrics
     nova: vms
   keyringSecrets:
@@ -185,30 +199,32 @@ ceph:
     cinderVolume: cinder-volume-rbd
     cinderBackup: cinder-backup-rbd
     gnocchi: gnocchi-rbd
+    nova: nova-rbd
 
 patroni:
   replicas: {{ default 3 (env "RDBMS_COUNT") }}
   bouncers: 1
   image: docker.io/zer0def/spilo
-  tag: 14-2.1p3-tsl2.5.0-citus
+  tag: 15-2.1p9-tsl2.9.3-citus
 
 {{ $osCommonNodeSelector := dict "node_selector_key" "node-role.kubernetes.io/node" "node_selector_value" "" }}
 openstack:
   namespace: {{ default "openstack" (env "OPENSTACK_NAMESPACE") }}
-  version: {{ default "xena" (env "OS_VERSION") }}
+  version: {{ default "zed" (env "OS_VERSION") }}
   baseImage: {{ default "ubuntu_focal" (env "BASE_IMAGE") }}
   neutron:
     extBridge:
       name: br-ex
-      network: public
-      cidr: "172.24.4.0/24"
-      addr: "172.24.4.1/24"
-      iface: eth0
+      network: provider
+      iface: eth1
   nodeSelectors:
     common:
       {{ toYaml $osCommonNodeSelector | nindent 6 }}
     neutronOvs:
       {{ toYaml $osCommonNodeSelector | nindent 6 }}
+  octavia:
+    amphora:
+      image_tag: amphora
   rmq:
     replicas: {{ default 3 (env "RMQ_NODE_COUNT") }}
   tls:
@@ -222,3 +238,21 @@ openstack:
         kind: ClusterIssuer
     secrets:
       database: "openstack-on-pg"
+
+certManager:
+  namespace: kube-system
+
+etcd:
+  namespace: kube-system
+  rootPassword: etcd
+
+flannelInternal:
+  namespace: kube-system
+
+openebs:
+  namespace: kube-system
+
+vault:
+  namespace: kube-system
+
+kubeApiIp: {{ default "10.32.0.1" (env "KUBE_API_IP") }}

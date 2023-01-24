@@ -14,3 +14,4 @@ helmfiles:
 - "{{ requiredEnv "MYDIR" }}/helmfile/rook.yaml"
 - "{{ requiredEnv "MYDIR" }}/helmfile/infra.yaml"
 - "{{ requiredEnv "MYDIR" }}/helmfile/openstack.yaml"
+- "{{ requiredEnv "MYDIR" }}/helmfile/skydive.yaml"

@@ -46,6 +46,24 @@ create_volumes(){
   done
 }
 
+urlparse(){
+  local protocol="${1%%://*}" tail="${1#*://}"
+  [ "${protocol}" != "${tail}" ] || unset protocol
+  local head="${tail%%#*}" fragment="${tail#*#}"
+  [ "${fragment}" != "${head}" ] || unset fragment
+  local head="${head%%\?*}" qs="${head#*\?}"
+  [ "${qs}" != "${head}" ] || unset qs
+  local netloc="${head%%/*}" path="${head#*/}"
+  [ "${netloc}" != "${path}" ] || unset path
+  local auth="${netloc%@*}" endpoint="${netloc#*@}"
+  [ "${auth}" != "${endpoint}" ] || unset auth
+  local user pass
+  [ -z "${auth}" ] || user="${auth%%:*}" pass="${auth#*:}"
+  local host="${endpoint%:*}" port="${endpoint##*:}"
+  [ "${port}" != "${host}" ] || unset port
+  echo "${protocol}|${user}|${pass}|${host}|${port}|${path}|${qs}|${fragment}"
+}
+
 # common functions start
 registry_proxy_pre::k3d(){
   #for i in $(seq 0 $((${NUM_CONTROLLERS:-1}-1))); do KUBE_NOPROXY_SETTING+=(); done && \
@@ -251,6 +269,7 @@ launch_cluster(){
   [ "${K8S_RUNTIME}" = "k3d" ] && kubectl apply -f "${MYDIR}/utils/manifests/k3d-syslogd.yml" \
     && until kubectl -n kube-system wait --for condition=ready pod -l app=syslog; do sleep 1; done 2>/dev/null ||:
   install_rclone
+  export KUBE_API_IP="$(kubectl -n default get svc/kubernetes -o jsonpath='{.spec.clusterIP}')"
 }
 
 teardown_cluster::k3d(){
@@ -357,11 +376,6 @@ install_monitoring(){
     RELEASES_ISTIO_PROMETHEUS_OPERATOR="${RELEASES_ISTIO_PROMETHEUS_OPERATOR:=istio-prometheus-operator}"
 }
 
-install_serverless(){
-  # kubeless/openfaas?
-  export ENABLE_SERVERLESS=1 RELEASES_KUBELESS="${RELEASES_KUBELESS:-kubeless}"
-}
-
 install_rclone(){
   kubectl apply -f "${MYDIR}/rclone/deploy/kubernetes/1.19"
   # secret config?
@@ -401,10 +415,10 @@ kube_up(){
   [ "${INSTALL_STORAGE}" -ne 0 ] || install_storage
   [ "${INSTALL_SERVICE_MESH}" -ne 0 ] || install_service_mesh
   [ "${INSTALL_MONITORING}" -ne 0 ] || install_monitoring
-  [ "${INSTALL_SERVERLESS}" -ne 0 ] || install_serverless
 
   # apply helm releases
-  [ -n "${OMIT_HELMFILE}" ] || helmfile ${KUBEDEE_DEBUG:+--debug} -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
+  local ENDPOINT=$(CLUSTER=$(CTX=$(yq eval '.current-context' <(kubectl config view)) yq eval '.contexts[]|select(.name==env(CTX)).context.cluster' <(kubectl config view)) yq eval '.clusters[]|select(.name==env(CLUSTER)).cluster.server' <(kubectl config view))
+  [ -n "${OMIT_HELMFILE}" ] || KUBE_SERVICE_HOST=$(urlparse ${ENDPOINT} | awk -F'|' '{print $4}') KUBE_SERVICE_PORT=$(urlparse ${ENDPOINT} | awk -F'|' '{print $5}') helmfile ${SCRIPT_DEBUG:+--debug --log-level=debug} -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync --include-transitive-needs --include-needs  #apply ${SCRIPT_DEBUG:+--skip-cleanup}  # https://github.com/helmfile/helmfile/issues/582
 
   show_ingress_points
   echo "Now run \"kubectl proxy\" and go to http://127.0.0.1:8001/api/v1/namespaces/kubernetes-dashboard/services/http%3Akubernetes-dashboard%3A/proxy/ for your K8S dashboard."
@@ -431,16 +445,14 @@ Usage: ${MYNAME} [options] <up|down>
 Options:
   --no-*, --with-*                    disable/enable installation of selected
                                       component (choice of: registry-proxy,
-                                        monitoring, serverless, service-mesh,
-                                        storage, local-registry,
-                                        env: non-zero value on INSTALL_*)
+                                        monitoring, service-mesh, local-registry,
+                                        storage, env: non-zero value on INSTALL_*)
   -N <name>, --name <name>            cluster name (default: ${CLUSTER_NAME},
                                         env: CLUSTER_NAME)
   -n <num>, --num <num>               number of workers (default: \`nproc\`/4,
                                         env: NUM_WORKERS)
   -r <runtime>, --runtime <runtime>   runtime choice (default: ${K8S_RUNTIME},
-                                        choice of: k3d, kubedee,
-                                        env: K8S_RUNTIME)
+                                        choice of: k3d, kubedee, env: K8S_RUNTIME)
   -t <tag>, --tag <tag>               set runtime version (env: RUNTIME_TAG)
   -s <pool>, --storage-pool <pool>    LXD storage pool to use with Kubedee
                                         (default: ${LXD_STORAGE_POOL},
@@ -483,7 +495,7 @@ main(){
   : ${LXD_STORAGE_POOL:=default}
 
   : ${CONTROLLER_MEMORY_SIZE:=2GiB}
-  : ${WORKER_MEMORY_SIZE:=16GiB}
+  : ${WORKER_MEMORY_SIZE:=19GiB}
   : ${ROOTFS_SIZE:=40GiB}
 
   while [ "${#}" -gt 0 ]; do
@@ -551,8 +563,6 @@ main(){
   declare -A NAMESPACES=(
     [monitoring]="${NAMESPACES_MONITORING:=monitoring}"
     [network]="${NAMESPACES_NETWORK:=network}"
-    [serverless]="${NAMESPACES_SERVERLESS:=serverless}"
-    [serverless_functions]="${NAMESPACES_SERVERLESS_FUNCTIONS:=serverless-functions}"
     [storage]="${NAMESPACES_STORAGE:=storage}"
   )
 
@@ -565,7 +575,7 @@ main(){
     #[k3d]="0.9.1"  # k8s-1.15
     #[k3d]="1.0.1"  # k8s-1.16
     [k3d]="${RUNTIME_TAG:-1.26.1-k3s1}"
-    [kubedee]="${RUNTIME_TAG:-1.26.1}"
+    [kubedee]="${RUNTIME_TAG:-1.26.3}"
   )
   echo "${RUNTIME_VERSIONS[k3d]}" | grep -E '^0\.[0-9]\.' && OLD_K3S=0 || OLD_K3S=1
   [ "${OLD_K3S}" -eq 0 ] && SHIM_VERSION=v1 || SHIM_VERSION=v2

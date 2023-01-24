@@ -4,9 +4,6 @@ namespaces:
   development: {{ default "development" (env "NAMESPACES_DEVELOPMENT") }}
   monitoring: {{ default "monitoring" (env "NAMESPACES_MONITORING") }}
   network: {{ default "network" (env "NAMESPACES_NETWORK") }}
-  serverless: {{ default "serverless" (env "NAMESPACES_SERVERLESS") }}
-  serverlessFunctions: {{ default "serverless-fn" (env "NAMESPACES_SERVERLESS_FUNCTIONS") }}
-  serverlessBuild: {{ default "serverless-bld" (env "NAMESPACES_SERVERLESS_BUILD") }}
   storage: {{ default "storage" (env "NAMESPACES_STORAGE") }}
 
 releases:
@@ -48,6 +45,7 @@ releases:
   redis: {{ default "redis" (env "RELEASES_REDIS") }}
   seaweedfs: {{ default "seaweedfs" (env "RELEASES_SEAWEEDFS") }}
   sentry: {{ default "sentry" (env "RELEASES_SENTRY") }}
+  skydive: {{ default "skydive" (env "RELEASES_SKYDIVE") }}
   thanos: {{ default "thanos" (env "RELEASES_THANOS") }}
   vault: {{ default "vault" (env "RELEASES_VAULT") }}
   zulip: {{ default "zulip" (env "RELEASES_ZULIP") }}
@@ -86,22 +84,22 @@ versions:
     nginx: {{ default "edge-alpine" (env "VERSIONS_NGINX") }}
     openebs: {{ default "2.11.0" (env "VERSIONS_OPENEBS") }}
     openebsNdm: {{ default "1.3.0" (env "VERSIONS_OPENEBS_NDM") }}
-    prometheusAdapter: {{ default "0.9.1" (env "VERSIONS_PROMETHEUS_ADAPTER") }}
+    prometheusAdapter: {{ default "0.10.0" (env "VERSIONS_PROMETHEUS_ADAPTER") }}
     promscale: {{ default "0.17.0" (env "VERSIONS_PROMSCALE") }}
     #redis: {{ default "6.2.7-alpine" (env "VERSIONS_REDIS") }}
     redis: {{ default "7.0.5-alpine" (env "VERSIONS_REDIS") }}
     #redisHaproxy: {{ default "2.4-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
     redisHaproxy: {{ default "2.6-alpine" (env "VERSIONS_REDIS_HAPROXY") }}
-    redPanda: {{ default "22.3.11" (env "VERSIONS_REDPANDA") }}
+    redPanda: {{ default "22.3.12" (env "VERSIONS_REDPANDA") }}
     scyllaAgent: {{ default "2.6.5" (env "VERSIONS_SCYLLA_AGENT") }}
     scyllaManager: {{ default "2.6.5" (env "VERSIONS_SCYLLA_MANAGER") }}
     scyllaManagerController: {{ default "2.6.5" (env "VERSIONS_SCYLLA_MANAGER") }}
     scyllaServer: {{ default "5.1.3" (env "VERSIONS_SCYLLA_SERVER") }}
-    seaweedfs: {{ default "v3.40" (env "VERSIONS_SEAWEEDFS") }}
+    seaweedfs: {{ default "v3.41" (env "VERSIONS_SEAWEEDFS") }}
     sentry: {{ default "23.1.1" (env "VERSIONS_SENTRY") }}
-    thanos: {{ default "0.30.1" (env "VERSIONS_THANOS") }}
-    vault: {{ default "1.12.2" (env "VERSIONS_VAULT") }}
-    vaultK8s: {{ default "1.1.0" (env "VERSIONS_VAULT_K8S") }}
+    thanos: {{ default "0.30.2" (env "VERSIONS_THANOS") }}
+    vault: {{ default "1.12.3" (env "VERSIONS_VAULT") }}
+    vaultK8s: {{ default "1.2.0" (env "VERSIONS_VAULT_K8S") }}
     zulip: {{ default "6.1-0" (env "VERSIONS_ZULIP") }}
 
 chartBases:
@@ -116,10 +114,8 @@ chartBases:
 
 enables:
   anchore: {{ not (empty (env "ENABLE_ANCHORE")) }}
-  cortex: {{ not (empty (env "ENABLE_CORTEX")) }}
   monitoring: {{ not (empty (env "ENABLE_MONITORING")) }}
   network: {{ not (empty (env "ENABLE_NETWORK")) }}
-  promscale: {{ not (empty (env "ENABLE_PROMSCALE")) }}
   serverless: {{ not (empty (env "ENABLE_SERVERLESS")) }}
   storage: {{ not (empty (env "ENABLE_STORAGE")) }}
   openebs: {{ not (empty (env "ENABLE_OPENEBS")) }}
@@ -184,9 +180,9 @@ patroni:
   #image: timescale/timescaledb
   #tag: latest-pg13
   image: docker.io/zer0def/spilo
-  tag: 13-2.1p9-tsl2.9.1-citus
-  #tag: 14-2.1p9-tsl2.9.1-citus
-  #tag: 15-2.1p9-tsl2.9.1-citus
+  #tag: 13-2.1p9-tsl2.9.3-citus
+  #tag: 14-2.1p9-tsl2.9.3-citus
+  tag: 15-2.1p9-tsl2.9.3-citus
 
 rabbitmq:
   password: {{ default "rabbitmq" (env "RMQ_PASSWORD") }}
@@ -247,6 +243,7 @@ istio:
 
 kafka:
   replicas: 3
+  bucket: kafka
 
 clickhouse:
   image: yandex/clickhouse-server
@@ -342,3 +339,6 @@ ferretdb:
   name: ferretdb
   user: ferretdb
   pass: ferretdb
+
+skydive:
+  bucket: skydive

@@ -66,3 +66,15 @@
 [submodule "charts/skydive"]
 	path = charts/skydive
 	url = https://github.com/zer0def/skydive-chart
+[submodule "charts/vaultwarden"]
+	path = charts/vaultwarden
+	url = https://github.com/guerzon/vaultwarden
+[submodule "charts/kube-ovn"]
+	path = charts/kube-ovn
+	url = https://github.com/kubeovn/kube-ovn
+[submodule "charts/mkhpalm"]
+	path = charts/mkhpalm
+	url = https://github.com/mkhpalm/helm-charts
+[submodule "charts/dandy"]
+	path = charts/dandy
+	url = https://github.com/DandyDeveloper/charts

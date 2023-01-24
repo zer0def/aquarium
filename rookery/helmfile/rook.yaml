@@ -3,7 +3,7 @@ bases:
 ---
 helmDefaults:
   wait: true
-  timeout: {{ .Values.helmTimeout }}
+  timeout: {{ default "86400" .Values.helmTimeout }}
   tillerless: false
   #skipDeps: true
   #createNamespace: true
@@ -34,19 +34,17 @@ releases:
         value: ""
         #effect: "NoSchedule,PreferNoSchedule,NoExecute"
   hooks:
-  - events: ["presync"]
-    command: "/bin/sh"
-    args:
-    - "-xec"
-    - "until kubectl -n kube-system wait --for condition=available deploy/coredns; do sleep 1; done 2>/dev/null"
+      #kubectl -n {{ .Values.rook.namespace }} get job "rook-ceph-osd-prepare-<node>" -o json | jq 'del(.spec.selector)' | jq 'del(.spec.template.metadata.labels)' | kubectl -n {{ .Values.rook.namespace }} replace --force -f -
   - events: ["postsync"]
     command: "/bin/sh"
     args:
     - "-xec"
     - |
       kubectl get ns {{ .Values.rook.namespace }} || kubectl create ns {{ .Values.rook.namespace }}
-      until kubectl wait --for condition=established crd/cephclusters.ceph.rook.io; do sleep 1; done 2>/dev/null ||:
+      kubectl get ns {{ .Values.rook.next.namespace }} || kubectl create ns {{ .Values.rook.next.namespace }}
+      for i in $(seq 3); do until kubectl wait --for condition=established crd/cephclusters.ceph.rook.io; do sleep 3; done 2>/dev/null; sleep 3; done ||:
       kubectl apply -f- <<EOF
+      ---
       kind: ConfigMap
       apiVersion: v1
       metadata:
@@ -57,51 +55,6 @@ releases:
           [global]
           osd_pool_default_size = 1
       ---
-      # https://rook.io/docs/rook/latest/ceph-client-crd.html
-      apiVersion: ceph.rook.io/v1
-      kind: CephClient
-      metadata:
-        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        caps:
-          mon: 'profile rbd'
-          osd: 'profile rbd pool={{ .Values.ceph.pools.glance }}'
-          mgr: 'profile rbd pool={{ .Values.ceph.pools.glance }}'
-      ---
-      apiVersion: ceph.rook.io/v1
-      kind: CephClient
-      metadata:
-        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        caps:
-          mon: 'profile rbd'
-          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd-read-only pool={{ .Values.ceph.pools.glance }}'
-          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.nova }}'
-      ---
-      apiVersion: ceph.rook.io/v1
-      kind: CephClient
-      metadata:
-        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        caps:
-          mon: 'profile rbd'
-          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}'
-          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}'
-      ---
-      apiVersion: ceph.rook.io/v1
-      kind: CephClient
-      metadata:
-        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        caps:
-          mon: 'profile rbd'
-          osd: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}'
-          mgr: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}'
-      ---
       # https://rook.io/docs/rook/latest/ceph-cluster-crd.html
       apiVersion: ceph.rook.io/v1
       kind: CephCluster
@@ -109,29 +62,44 @@ releases:
         name: {{ .Values.rook.cluster }}
         namespace: {{ .Values.rook.namespace }}
       spec:
-        dataDirHostPath: /var/lib/rook
+        dataDirHostPath: "/var/lib/ceph/{{ .Values.rook.namespace }}"
+        skipUpgradeChecks: true  # skip "OSD is not ok-to-stop" during provisioning
         cephVersion:
-          image: ceph/ceph:v{{ .Values.versions.images.ceph }}
+          #image: ceph/ceph:v{{ .Values.versions.images.ceph }}
+          image: quay.io/ceph/ceph:v{{ .Values.versions.images.ceph }}
           allowUnsupported: true
         mon:
           count: {{ default 3 (env "CEPH_MON_COUNT") }}
           allowMultiplePerNode: true
         mgr:
+          count: {{ default 2 (env "CEPH_MGR_COUNT") }}
+          allowMultiplePerNode: true
           modules:
           - name: pg_autoscaler
             enabled: true
+          #- name: telemetry
+          #  enabled: false
         dashboard:
           enabled: true
         crashCollector:
           disable: true
-{{- if .Values.rook.cephfs.enabled }}
-        network:  # ref: https://github.com/rook/rook/issues/4006#issuecomment-602044153
-          hostNetwork: true
-{{- end }}
+        cleanupPolicy:
+          sanitizeDisks:
+            method: complete
+            dataSource: random
+            iteration: 3
+        network:
+          connections:  # ceph v17+
+            #requireMsgr2: true
+            compression:
+              enabled: true
+            encryption:
+              enabled: true
         storage:
 {{- if .Values.rook.hostBasedOSDs }}
-          useAllDevices: true
           useAllNodes: true
+          #useAllDevices: true
+          deviceFilter: '^[sv]d[b-e]$'
           #devicePathFilter: '^/dev/disk/by-id/scsi-.*QEMU_HARDDISK.*'
           #nodes:
           #- name: {{ env "FIRST_WORKER" | quote }}
@@ -163,21 +131,6 @@ releases:
       apiVersion: v1
       kind: Service
       metadata:
-        name: {{ .Values.rook.namespace }}-mgr-dashboard-expose
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        type: NodePort
-        selector:
-          rook_cluster: {{ .Values.rook.namespace }}
-          app: rook-ceph-mgr
-        ports:
-        - port: 7000
-          protocol: TCP
-          targetPort: 7000
-      ---
-      apiVersion: v1
-      kind: Service
-      metadata:
         name: ceph-mon
         namespace: {{ .Values.rook.namespace }}
       spec:
@@ -187,10 +140,12 @@ releases:
           rook_cluster: {{ .Values.rook.namespace }}
           ceph_daemon_type: mon
         ports:
+{{/*
         - name: tcp-msgr1
           port: 6789
           protocol: TCP
           targetPort: 6789
+*/}}
         - name: tcp-msgr2
           port: 3300
           protocol: TCP
@@ -215,8 +170,10 @@ releases:
             containers:
             - name: rook-ceph-tools
               image: rook/ceph:{{ .Values.versions.charts.rook }}
-              command: ["/tini"]
-              args: ["-g", "--", "/usr/local/bin/toolbox.sh"]
+              #command: ["/tini"]
+              #args: ["-g", "--", "/usr/local/bin/toolbox.sh"]
+              command: ["/bin/bash"]
+              args: ["-e", "/usr/local/bin/toolbox.sh"]
               imagePullPolicy: IfNotPresent
               env:
               - name: ROOK_CEPH_USERNAME
@@ -267,50 +224,568 @@ releases:
               effect: "NoExecute"
               tolerationSeconds: 5
       EOF
-      #until kubectl -n {{ .Values.rook.namespace }} wait --for condition=ready cephcluster {{ .Values.rook.cluster }}; do sleep 1; done 2>/dev/null
+      until kubectl -n {{ .Values.rook.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephcluster/{{ .Values.rook.cluster }}"; do sleep 3; done
+      until kubectl -n {{ .Values.rook.namespace }} wait --for condition=ready pod -l app=rook-ceph-tools; do sleep 3; done
+      kubectl -n {{ .Values.rook.namespace }} exec -i deploy/rook-ceph-tools -- /bin/sh <<EOF
+      until ceph -s; do sleep 3; done
+      ceph config set mon mon_max_pg_per_osd 500
+      #ceph mgr module disable telemetry
+      #ceph mgr module enable rook
+      #ceph orch set backend rook
+      #radosgw-admin period update --commit
+      #ceph dashboard set-rgw-credentials
+      EOF
+      ### NEXT CLUSTER ### not sure whether to look, given how rbac resources are created in main namespace from chart templates
       kubectl apply -f- <<EOF
+      ---
+      kind: ConfigMap
+      apiVersion: v1
+      metadata:
+        name: rook-config-override
+        namespace: {{ .Values.rook.next.namespace }}
+      data:
+        config: |
+          [global]
+          osd_pool_default_size = 1
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephCluster
+      metadata:
+        name: {{ .Values.rook.next.cluster }}
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        dataDirHostPath: "/var/lib/ceph/{{ .Values.rook.next.namespace }}"
+        skipUpgradeChecks: true  # skip "OSD is not ok-to-stop" during provisioning
+        cephVersion:
+          #image: ceph/ceph:v{{ .Values.versions.images.ceph }}
+          image: quay.io/ceph/ceph:v{{ .Values.versions.images.ceph }}
+          allowUnsupported: true
+        mon:
+          count: {{ default 3 (env "CEPH_MON_COUNT") }}
+          allowMultiplePerNode: true
+        mgr:
+          count: {{ default 2 (env "CEPH_MGR_COUNT") }}
+          allowMultiplePerNode: true
+          modules:
+          - name: pg_autoscaler
+            enabled: true
+          #- name: telemetry
+          #  enabled: false
+        dashboard:
+          enabled: true
+        crashCollector:
+          disable: true
+        cleanupPolicy:
+          sanitizeDisks:
+            method: complete
+            dataSource: random
+            iteration: 3
+        network:
+          connections:  # ceph v17+
+            #requireMsgr2: true
+            compression:
+              enabled: true
+            encryption:
+              enabled: true
+        storage:
+{{- if .Values.rook.hostBasedOSDs }}
+          useAllNodes: true
+          deviceFilter: '^[sv]d[f-g]$'
+{{- else }}
+          ## PVC-based
+          storageClassDeviceSets:
+          - name: set1
+            count: {{ int (default "6" (env "NUM_VOLUMES")) }}
+            placement:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                  - matchExpressions:
+                    - key: 'node-role.kubernetes.io/master'
+                      operator: DoesNotExist
+            volumeClaimTemplates:
+            - metadata:
+                name: data
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                volumeMode: Block
+                storageClassName: {{ .Values.backingStorageClass }}
+                resources:
+                  requests:
+                    storage: {{ trimSuffix "B" (default "10GiB" (env "VOLUME_SIZE")) }}
+{{- end }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-cluster-mgmt
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: rook-ceph-cluster-mgmt
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-system
+        namespace: rook-ceph
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-cmd-reporter
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: rook-ceph-cmd-reporter
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-cmd-reporter
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-cmd-reporter-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-cmd-reporter
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-mgr-system
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: rook-ceph-mgr-system
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-mgr
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-mgr-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-mgr
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-osd-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-purge-osd-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-purge-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-rgw-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-rgw
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-default-psp
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: "psp:rook"
+      subjects:
+      - kind: ServiceAccount
+        name: default
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rook-ceph-cmd-reporter
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: Role
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-cmd-reporter
+        namespace: {{ .Values.rook.next.namespace }}
+      rules:
+      - apiGroups: [""]
+        resources: ["pods","configmaps"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+      ---
+      kind: Role
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get", "list", "watch", "create", "update", "delete"]
+      - apiGroups: ["ceph.rook.io"]
+        resources: ["cephclusters", "cephclusters/finalizers"]
+        verbs: ["get", "list", "create", "update", "delete"]
+      ---
+      kind: ClusterRole
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-osd-external
+      rules:
+      - apiGroups: [""]
+        resources: ["nodes"]
+        verbs: ["get", "list"]
+      ---
+      kind: ClusterRoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-osd-external
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: rook-ceph-osd-external
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-osd-external
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: rook-ceph-osd
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rook-ceph-mgr
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rook-ceph-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      # Aspects of ceph osd purge job that require access to the operator/cluster namespace
+      kind: Role
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-purge-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      rules:
+      - apiGroups: [""]
+        resources: ["configmaps"]
+        verbs: ["get"]
+      - apiGroups: ["apps"]
+        resources: ["deployments"]
+        verbs: ["get", "delete"]
+      - apiGroups: ["batch"]
+        resources: ["jobs"]
+        verbs: ["get", "list", "delete"]
+      - apiGroups: [""]
+        resources: ["persistentvolumeclaims"]
+        verbs: ["get", "update", "delete", "list"]
+      ---
+      # Allow the osd purge job to run in this namespace
+      kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: rook-ceph-purge-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: rook-ceph-purge-osd
+      subjects:
+      - kind: ServiceAccount
+        name: rook-ceph-purge-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rook-ceph-purge-osd
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: rook-ceph-rgw
+        namespace: {{ .Values.rook.next.namespace }}
+      ---
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: ceph-mon
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        clusterIP: None
+        selector:
+          mon_cluster: {{ .Values.rook.next.namespace }}
+          rook_cluster: {{ .Values.rook.next.namespace }}
+          ceph_daemon_type: mon
+        ports:
+{{/*
+        - name: tcp-msgr1
+          port: 6789
+          protocol: TCP
+          targetPort: 6789
+*/}}
+        - name: tcp-msgr2
+          port: 3300
+          protocol: TCP
+          targetPort: 3300
+      ---
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rook-ceph-tools
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: rook-ceph-tools
+        template:
+          metadata:
+            labels:
+              app: rook-ceph-tools
+          spec:
+            dnsPolicy: ClusterFirstWithHostNet
+            containers:
+            - name: rook-ceph-tools
+              image: rook/ceph:{{ .Values.versions.charts.rook }}
+              #command: ["/tini"]
+              #args: ["-g", "--", "/usr/local/bin/toolbox.sh"]
+              command: ["/bin/bash"]
+              args: ["-e", "/usr/local/bin/toolbox.sh"]
+              imagePullPolicy: IfNotPresent
+              env:
+              - name: ROOK_CEPH_USERNAME
+                valueFrom:
+                  secretKeyRef:
+                    name: rook-ceph-mon
+                    key: ceph-username
+              - name: ROOK_CEPH_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: rook-ceph-mon
+                    key: ceph-secret
+              securityContext:
+                privileged: true
+              volumeMounts:
+              - name: ceph-config
+                mountPath: /etc/ceph
+              - name: mon-endpoint-volume
+                mountPath: /etc/rook
+              - name: dev
+                mountPath: /dev
+              - name: sysbus
+                mountPath: /sys/bus
+              - name: libmodules
+                mountPath: /lib/modules
+            #hostNetwork: true
+            volumes:
+            - name: mon-endpoint-volume
+              configMap:
+                name: rook-ceph-mon-endpoints
+                items:
+                - key: data
+                  path: mon-endpoints
+            - name: ceph-config
+              emptyDir: {}
+            - name: dev
+              hostPath:
+                path: /dev
+            - name: sysbus
+              hostPath:
+                path: /sys/bus
+            - name: libmodules
+              hostPath:
+                path: /lib/modules
+            tolerations:
+            - key: "node.kubernetes.io/unreachable"
+              operator: "Exists"
+              effect: "NoExecute"
+              tolerationSeconds: 5
+      EOF
+      ### /NEXT CLUSTER ###
+      until kubectl -n {{ .Values.rook.next.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephcluster/{{ .Values.rook.next.cluster }}"; do sleep 3; done
+      until kubectl -n {{ .Values.rook.next.namespace }} wait --for condition=ready pod -l app=rook-ceph-tools; do sleep 3; done
+      kubectl -n {{ .Values.rook.next.namespace }} exec -i deploy/rook-ceph-tools -- /bin/sh <<EOF
+      until ceph -s; do sleep 3; done
+      ceph config set mon mon_max_pg_per_osd 500
+      #ceph mgr module disable telemetry
+      #ceph mgr module enable rook
+      #ceph orch set backend rook
+      EOF
+      kubectl apply -f- <<EOF
+      ---
+      # https://rook.io/docs/rook/latest/ceph-client-crd.html
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.glance }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.glance }}, profile rbd pool={{ .Values.ceph.pools.glance }}{{ .Values.ceph.osEcPoolSuffix }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.glance }}, profile rbd pool={{ .Values.ceph.pools.glance }}{{ .Values.ceph.osEcPoolSuffix }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderVolume }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.cinderVolume }}{{ .Values.ceph.osEcPoolSuffix }}, profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd pool={{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}, profile rbd-read-only pool={{ .Values.ceph.pools.glance }}, profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd-read-only pool={{ .Values.ceph.pools.glance }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderVolume }}, profile rbd pool={{ .Values.ceph.pools.cinderVolume }}{{ .Values.ceph.osEcPoolSuffix }}, profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd pool={{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.cinderBackup }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}, profile rbd pool={{ .Values.ceph.pools.cinderBackup }}{{ .Values.ceph.osEcPoolSuffix }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.cinderBackup }}, profile rbd pool={{ .Values.ceph.pools.cinderBackup }}{{ .Values.ceph.osEcPoolSuffix }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.nova }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd pool={{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.nova }}, profile rbd pool={{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}'
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephClient
+      metadata:
+        name: {{ .Values.openstack.namespace }}-{{ .Values.ceph.keyringSecrets.gnocchi }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        caps:
+          mon: 'profile rbd'
+          osd: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}, profile rbd pool={{ .Values.ceph.pools.gnocchi }}{{ .Values.ceph.osEcPoolSuffix }}'
+          mgr: 'profile rbd pool={{ .Values.ceph.pools.gnocchi }}, profile rbd pool={{ .Values.ceph.pools.gnocchi }}{{ .Values.ceph.osEcPoolSuffix }}'
+      EOF
+{{- if or .Values.rook.rbd.enabled .Values.rook.object.enabled .Values.rook.cephfs.enabled .Values.rook.nfs.enabled }}
 {{- if .Values.rook.rbd.enabled }}
-      # https://rook.io/docs/rook/latest/ceph-pool-crd.html
-      # https://rook.github.io/docs/rook/latest/ceph-block.html
+      kubectl apply -f- <<EOF
+{{- range (list .Values.ceph.pools.glance .Values.ceph.pools.cinderVolume .Values.ceph.pools.cinderBackup .Values.ceph.pools.nova .Values.ceph.pools.gnocchi) }}
+      ---
+      # https://rook.github.io/docs/rook/latest/CRDs/Block-Storage/ceph-block-pool-crd/
       # https://rook.github.io/docs/rook/latest/direct-tools.html
       apiVersion: ceph.rook.io/v1
       kind: CephBlockPool
       metadata:
-        name: {{ .Values.rook.replicaPool }}
-        namespace: {{ .Values.rook.namespace }}
+        name: {{ . | quote }}
+        namespace: {{ $.Values.rook.namespace }}
       spec:
         failureDomain: osd
+        enableRBDStats: true
         replicated:
           size: 2
+        parameters:
+          compression_algorithm: zstd
+          compression_mode: aggressive
+        #  nosizechange: 1
       ---
       apiVersion: ceph.rook.io/v1
       kind: CephBlockPool
       metadata:
-        name: ecpool
-        namespace: {{ .Values.rook.namespace }}
+        name: "{{ . }}{{ $.Values.ceph.osEcPoolSuffix }}"
+        namespace: {{ $.Values.rook.namespace }}
       spec:
         failureDomain: osd
+        enableRBDStats: true
+        #deviceClass: hdd
         erasureCoded:
           dataChunks: 2
           codingChunks: 1
-        #deviceClass: hdd
+        parameters:
+          allow_ec_overwrites: "true"
+          compression_algorithm: zstd
+          compression_mode: aggressive
+          fast_read: "true"
+        #  nosizechange: 1
       ---
       apiVersion: storage.k8s.io/v1
       kind: StorageClass
       metadata:
-        name: rook-ceph-block
-      provisioner: {{ .Values.rook.namespace }}.rbd.csi.ceph.com
+        name: "{{ . }}"
+      provisioner: "{{ $.Values.rook.namespace }}.rbd.csi.ceph.com"
       reclaimPolicy: Delete
       parameters:
         # clusterID is the namespace where the rook cluster is running
-        clusterID: {{ .Values.rook.namespace }}
+        clusterID: {{ $.Values.rook.namespace }}
         # If you want to use erasure coded pool with RBD, you need to create
         # two pools. one erasure coded and one replicated.
         # You need to specify the replicated pool here in the "pool" parameter, it is
         # used for the metadata of the images.
         # The erasure coded pool must be set as the "dataPool" parameter below.
-        dataPool: ecpool
-        pool: {{ .Values.rook.replicaPool }}
+        dataPool: "{{ . }}{{ $.Values.ceph.osEcPoolSuffix }}"
+        pool: {{ . | quote }}
 
         # RBD image format. Defaults to "2".
         imageFormat: "2"
@@ -321,26 +796,62 @@ releases:
         # The secrets contain Ceph admin credentials. These are generated automatically by the operator
         # in the same namespace as the cluster.
         csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
-        csi.storage.k8s.io/provisioner-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/provisioner-secret-namespace: {{ $.Values.rook.namespace }}
         csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
-        csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/controller-expand-secret-namespace: {{ $.Values.rook.namespace }}
         csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
-        csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.rook.namespace }}
+        csi.storage.k8s.io/node-stage-secret-namespace: {{ $.Values.rook.namespace }}
 
         # Specify the filesystem type of the volume. If not specified, csi-provisioner
         # will set default as "ext4".
         csi.storage.k8s.io/fstype: ext4
 {{- end }}
+      EOF
+{{ range (list .Values.ceph.pools.glance .Values.ceph.pools.cinderVolume .Values.ceph.pools.cinderBackup .Values.ceph.pools.nova .Values.ceph.pools.gnocchi) }}
+      until kubectl -n {{ $.Values.rook.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephblockpool/{{ . }}{{ $.Values.ceph.osEcPoolSuffix }}"; do sleep 3; done
+{{ end }}
+      kubectl -n {{ .Values.rook.namespace }} exec -i deploy/rook-ceph-tools -- /bin/sh -x <<EOF
+      until ceph -s; do sleep 3; done
+      ceph osd pool application enable "{{ .Values.ceph.pools.cinderBackup }}" cinder-backup --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.cinderBackup }}{{ .Values.ceph.osEcPoolSuffix }}" cinder-backup --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.cinderVolume }}" cinder-volume --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.cinderVolume }}{{ .Values.ceph.osEcPoolSuffix }}" cinder-volume --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.glance }}" glance-image --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.glance }}{{ .Values.ceph.osEcPoolSuffix }}" glance-image --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.gnocchi }}" gnocchi-metrics --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.gnocchi }}{{ .Values.ceph.osEcPoolSuffix }}" gnocchi-metrics --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.nova }}" nova-compute --yes-i-really-mean-it
+      ceph osd pool application enable "{{ .Values.ceph.pools.nova }}{{ .Values.ceph.osEcPoolSuffix }}" nova-compute --yes-i-really-mean-it
+      EOF
+{{- end }}
 {{- if .Values.rook.object.enabled }}
+      kubectl apply -f- <<EOF
       ---
-      # https://rook.io/docs/rook/latest/ceph-object-store-crd.html
-      # https://rook.github.io/docs/rook/latest/ceph-object.html
+      # https://rook.github.io/docs/rook/latest/CRDs/Object-Storage/ceph-object-realm-crd/
       apiVersion: ceph.rook.io/v1
-      kind: CephObjectStore
+      kind: CephObjectRealm
       metadata:
-        name: {{ .Values.rook.object.store.name }}
+        name: {{ .Values.rook.object.realm }}
+        namespace: {{ .Values.rook.namespace }}
+      ---
+      # https://rook.github.io/docs/rook/latest/CRDs/Object-Storage/ceph-object-zonegroup-crd/
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectZoneGroup
+      metadata:
+        name: "{{ .Values.rook.object.realm }}-a"
         namespace: {{ .Values.rook.namespace }}
       spec:
+        realm: {{ .Values.rook.object.realm }}
+      ---
+      # https://rook.github.io/docs/rook/latest/CRDs/Object-Storage/ceph-object-zone-crd/
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectZone
+      metadata:
+        name: "{{ .Values.rook.object.realm }}-a-{{ .Values.rook.namespace }}"
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        zoneGroup: "{{ .Values.rook.object.realm }}-a"
+        preservePoolsOnDelete: true
         metadataPool:
           failureDomain: osd
           replicated:
@@ -350,12 +861,38 @@ releases:
           erasureCoded:
             dataChunks: 2
             codingChunks: 1
+      EOF
+      until kubectl -n {{ .Values.rook.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephobjectzone/{{ .Values.rook.object.realm }}-a-{{ .Values.rook.namespace }}"; do sleep 3; done
+      kubectl apply -f- <<EOF
+      ---
+      # https://rook.github.io/docs/rook/latest/CRDs/Object-Storage/ceph-object-store-crd/
+      # bug: https://github.com/rook/rook/issues/9660
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectStore
+      metadata:
+        name: {{ .Values.rook.cluster }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
         preservePoolsOnDelete: true
+        zone:
+          name: "{{ .Values.rook.object.realm }}-a-{{ .Values.rook.namespace }}"
         gateway:
-          type: s3
-          port: 8088
-          #securePort: 8443
+          #type: S3  # swift?
+          port: 8080  # RGW container port on SDN
+          #securePort: {{ .Values.rook.object.store.securePort }}
           instances: 2
+{{/*
+        # not used when zone is defined
+        metadataPool:
+          failureDomain: osd
+          replicated:
+            size: 2
+        dataPool:
+          failureDomain: osd
+          erasureCoded:
+            dataChunks: 2
+            codingChunks: 1
+*/}}
       ---
       apiVersion: storage.k8s.io/v1
       kind: StorageClass
@@ -364,7 +901,7 @@ releases:
       provisioner: {{ .Values.rook.namespace }}.ceph.rook.io/bucket
       reclaimPolicy: Delete
       parameters:
-        objectStoreName: {{ .Values.rook.object.store.name }}
+        objectStoreName: {{ .Values.rook.cluster }}
         objectStoreNamespace: {{ .Values.rook.namespace }}
         region: us-east-1
       ---
@@ -375,11 +912,12 @@ releases:
       spec:
         generateBucketName: ceph-bkt
         storageClassName: {{ .Values.rook.object.store.storageClass }}
+      EOF
 {{- end }}
 {{- if .Values.rook.cephfs.enabled }}
+      kubectl apply -f- <<EOF
       ---
-      # https://rook.io/docs/rook/latest/ceph-filesystem-crd.html
-      # https://rook.github.io/docs/rook/latest/ceph-filesystem.html
+      # https://rook.github.io/docs/rook/latest/CRDs/Shared-Filesystem/ceph-filesystem-crd/
       apiVersion: ceph.rook.io/v1
       kind: CephFilesystem
       metadata:
@@ -392,6 +930,10 @@ releases:
             size: 2
         dataPools:
         - failureDomain: osd
+          replicated:  # for erasure-coded data pools, you still need to create a primary pool as replicated, making EC a secondary :(
+            size: 2
+        - name: ec
+          failureDomain: osd
           erasureCoded:
             dataChunks: 2
             codingChunks: 1
@@ -399,24 +941,6 @@ releases:
         metadataServer:
           activeCount: 1
           activeStandby: true
-  {{- if .Values.rook.cephfs.nfs }}
-      ---
-      # https://rook.io/docs/rook/latest/ceph-nfs-crd.html
-      apiVersion: ceph.rook.io/v1
-      kind: CephNFS
-      metadata:
-        name: my-nfs
-        namespace: {{ .Values.rook.namespace }}
-      spec:
-        rados:
-          # RADOS pool where NFS client recovery data is stored.
-          pool: {{ .Values.rook.cephfs.name }}-data0
-          # RADOS namespace where NFS client recovery data is stored in the pool.
-          namespace: nfs-ns
-        # Settings for the NFS server
-        server:
-          active: 1
-  {{- end }}
       ---
       apiVersion: storage.k8s.io/v1
       kind: StorageClass
@@ -434,7 +958,7 @@ releases:
 
         # Ceph pool into which the volume shall be created
         # Required for provisionVolume: "true"
-        pool: {{ .Values.rook.cephfs.name }}-data0
+        pool: {{ .Values.rook.cephfs.name }}-ec
 
         # Root path of an existing CephFS volume
         # Required for provisionVolume: "false"
@@ -448,5 +972,112 @@ releases:
         csi.storage.k8s.io/controller-expand-secret-namespace: {{ .Values.rook.namespace }}
         csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
         csi.storage.k8s.io/node-stage-secret-namespace: {{ .Values.rook.namespace }}
-{{- end }}
       EOF
+{{- end }}
+{{- if .Values.rook.nfs.enabled }}
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephBlockPool
+      metadata:
+        name: builtin-nfs
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        name: .nfs
+        failureDomain: osd
+        enableRBDStats: true
+        #deviceClass: hdd
+        replicated:
+          size: 2
+        parameters:
+          allow_ec_overwrites: "true"
+          compression_algorithm: zstd
+          compression_mode: aggressive
+          fast_read: "true"
+        #  nosizechange: 1
+      EOF
+      until kubectl -n {{ .Values.rook.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephblockpool/builtin-nfs"; do sleep 3; done
+      kubectl apply -f- <<EOF
+      ---
+      # https://rook.github.io/docs/rook/latest/CRDs/ceph-nfs-crd/
+      # creates a ".nfs" pool, unless already pre-created, like above
+      apiVersion: ceph.rook.io/v1
+      kind: CephNFS
+      metadata:
+        name: {{ .Values.rook.cephfs.name }}
+        namespace: {{ .Values.rook.namespace }}
+      spec:
+        # Settings for the NFS server
+        server:
+          active: 1
+      EOF
+{{- end }}
+{{- if .Values.rook.object.enabled }}
+      until kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.rook.object.realm }}-keys" &>/dev/null; do sleep 3; done
+      kubectl -n {{ .Values.rook.namespace }} get "secret/{{ .Values.rook.object.realm }}-keys" -o json | jq 'del(.metadata.uid)' | jq 'del(.metadata.ownerReferences)' | jq 'del(.metadata.namespace)' | kubectl -n {{ .Values.rook.next.namespace }} apply -f-
+      until kubectl -n {{ .Values.rook.namespace }} wait --for jsonpath='{.status.phase}'=Connected "cephobjectstore/{{ .Values.rook.cluster }}"; do sleep 60; done
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectRealm
+      metadata:
+        name: {{ .Values.rook.object.realm }}
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        pull:
+          endpoint: "http://rook-ceph-rgw-{{ .Values.rook.cluster }}.{{ .Values.rook.namespace }}.svc:8080"
+          #endpoint: "http://rook-ceph-rgw-{{ .Values.rook.cluster }}.{{ .Values.rook.namespace }}.svc:{{ .Values.rook.object.store.port }}"
+          #endpoint: "https://rook-ceph-rgw-{{ .Values.rook.cluster }}.{{ .Values.rook.namespace }}.svc:{{ .Values.rook.object.store.securePort }}"
+      EOF
+      until kubectl -n {{ .Values.rook.next.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephobjectrealm/{{ .Values.rook.object.realm }}"; do sleep 3; done
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectZoneGroup
+      metadata:
+        name: "{{ .Values.rook.object.realm }}-a"
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        realm: {{ .Values.rook.object.realm }}
+      EOF
+      until kubectl -n {{ .Values.rook.next.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephobjectzonegroup/{{ .Values.rook.object.realm }}-a"; do sleep 3; done
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectZone
+      metadata:
+        name: "{{ .Values.rook.object.realm }}-a-{{ .Values.rook.next.namespace }}"
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        zoneGroup: "{{ .Values.rook.object.realm }}-a"
+        preservePoolsOnDelete: true
+        metadataPool:
+          failureDomain: osd
+          replicated:
+            size: 2
+        dataPool:
+          failureDomain: osd
+          erasureCoded:
+            dataChunks: 2
+            codingChunks: 1
+      EOF
+      until kubectl -n {{ .Values.rook.next.namespace }} wait --for jsonpath='{.status.phase}'=Ready "cephobjectzone/{{ .Values.rook.object.realm }}-a-{{ .Values.rook.next.namespace }}"; do sleep 3; done
+      kubectl apply -f- <<EOF
+      ---
+      apiVersion: ceph.rook.io/v1
+      kind: CephObjectStore
+      metadata:
+        name: {{ .Values.rook.next.cluster }}
+        namespace: {{ .Values.rook.next.namespace }}
+      spec:
+        preservePoolsOnDelete: true
+        zone:
+          name: "{{ .Values.rook.object.realm }}-a-{{ .Values.rook.next.namespace }}"
+        gateway:
+          #type: S3  # swift?
+          port: 8080  # RGW container port on SDN
+          #securePort: {{ .Values.rook.object.store.securePort }}
+          instances: 2
+      EOF
+{{- end }}
+{{- end }}

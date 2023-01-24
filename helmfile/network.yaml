@@ -14,6 +14,14 @@ repositories:
   url: "https://kiali.org/helm-charts"
 - name: traefik  # https://github.com/traefik/traefik-helm-chart
   url: "https://traefik.github.io/charts"
+- name: antrea  # https://github.com/antrea-io/antrea/tree/main/build/charts # OVS
+  url: "https://charts.antrea.io"
+
+# XDP
+- name: cilium  # https://github.com/cilium/charts # https://github.com/cilium/cilium/tree/v1.12.6/install/kubernetes/cilium
+  url: "https://helm.cilium.io/"
+- name: calico
+  url: "https://projectcalico.docs.tigera.io/charts"
 
 templates:
   istio:
@@ -395,6 +403,8 @@ releases:
       <<: *istioGlobal
     <<: *istioMixer
   {{- end }}
+
+# istio-cni?: https://github.com/istio/istio/tree/master/cni
 
 - name: {{ .Values.releases.istio.telemetry.grafana }}
   namespace: {{ .Values.namespaces.network }}

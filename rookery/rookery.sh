@@ -1,6 +1,9 @@
 #!/bin/bash -e
+if [ -n "${SCRIPT_DEBUG}" ]; then
+  set -x
+  export KUBEDEE_DEBUG=1
+fi
 export MYDIR="$(dirname "$(readlink -f "${0}")")"
-[ -z "${SCRIPT_DEBUG}" ] || export KUBEDEE_DEBUG=0
 . "${MYDIR}/../common"
 
 usage(){
@@ -40,7 +43,9 @@ declare -A STABLE_VERSION_REQUIREMENTS=(
 )
 
 OS_PROFILES=(infra python3 apache nginx haproxy lvm ceph linuxbridge openvswitch tftp ipxe qemu libvirt)
-OS_PIP_ARGS=("--use-feature=in-tree-build")
+OS_PIP_ARGS=(
+  #"--use-feature=in-tree-build"
+)
 OS_PIP_PKGS=(
   "psycopg2-binary<2.9"  # https://github.com/psycopg/psycopg2/issues/1293
   "uwsgi"
@@ -71,6 +76,9 @@ EOF
     "--build-arg" "CEPH_KEY=https://download.ceph.com/keys/release.asc"
     "--build-arg" "CEPH_REPO=https://download.ceph.com/debian-${CEPH_VERSION}/"
     "--build-arg" "CEPH_RELEASE=${CEPH_VERSION}"
+    "--build-arg" "FROM=docker.io/ubuntu:${BASE_IMAGE#*_}"
+    "--build-arg" "DISTRO_CODENAME=${BASE_IMAGE#*_}"
+    "--build-arg" "UBUNTU_RELEASE=${BASE_IMAGE#*_}"
   )
   LOCI_COMMON_BUILD_ARGS=(
     "--build-arg" "FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}'"
@@ -82,23 +90,22 @@ EOF
   )
 
   lxc exec "${BUILDER_HOST}" -- /bin/bash -ex <<EOF
-zypper in -ly docker
+#zypper in -ly docker
+DEBIAN_FRONTEND=noninteractive apt -y --no-install-recommends install docker.io
 echo '{"insecure-registries":["${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}"]}' >/etc/docker/daemon.json
 systemctl restart docker
 
 docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
   -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}" \
   --build-arg KUBE_VERSION=v${K8S_VERSION} \
-  -f "${OSH_IMG_LXD_LOCATION}/ceph-config-helper/Dockerfile.ubuntu_bionic" \
+  -f "${OSH_IMG_LXD_LOCATION}/ceph-config-helper/Dockerfile.${BASE_IMAGE}" \
   "${OSH_IMG_LXD_LOCATION}/ceph-config-helper" \
 && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/ceph-config-helper:${OS_TAG}")
 
 docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" || (docker build --force-rm ${OSH_IMG_COMMON_BUILD_ARGS[@]} \
   -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}" \
-  --build-arg FROM=docker.io/ubuntu:${BASE_IMAGE#*_} \
-  --build-arg UBUNTU_RELEASE=${BASE_IMAGE#*_} \
-  --build-arg UBUNTU_CLOUD_ARCHIVE_RELEASE="${OS_VERSION}" \
-  -f "${OSH_IMG_LXD_LOCATION}/libvirt/Dockerfile.ubuntu_${BASE_IMAGE#*_}" \
+  --build-arg UBUNTU_CLOUD_ARCHIVE_RELEASE="${UBUNTU_CLOUD_ARCHIVE_RELEASE:-yoga-proposed}" \
+  -f "${OSH_IMG_LXD_LOCATION}/libvirt/Dockerfile.${BASE_IMAGE}" \
   "${OSH_IMG_LXD_LOCATION}/libvirt" \
 && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/libvirt:${OS_TAG}")
 
@@ -114,22 +121,22 @@ docker build --force-rm \
 #  "${LOCI_LXD_LOCATION}" \
 #&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
 
-docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" || (docker build --force-rm \
-  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" \
-  --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
-  --build-arg FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}' \
-  --build-arg PYTHON3=yes \
-  --build-arg PIP_ARGS='${OS_PIP_ARGS[@]}' \
-  --build-arg PROJECT_RELEASE='${OS_VERSION}' \
-  --build-arg PROJECT="gnocchi" \
-  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} /tmp/gnocchi[keystone,mysql,postgresql,s3,redis,swift,ceph,prometheus,amqp1] tooz[consul,etcd,etcd3,etcd3gw,redis,postgresql,mysql,zookeeper,memcached]' \
-  --build-arg PROJECT_REPO="https://github.com/gnocchixyz/gnocchi" \
-  --build-arg PROJECT_REF="stable/4.4" \
-  "${LOCI_LXD_LOCATION}" \
-&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}")
+#docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" || (docker build --force-rm \
+#  -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}" \
+#  --build-arg PROFILES="requirements ${OS_PROFILES[@]}" \
+#  --build-arg FROM='${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/loci-base:${OS_TAG}' \
+#  --build-arg PYTHON3=yes \
+#  --build-arg PIP_ARGS='${OS_PIP_ARGS[@]}' \
+#  --build-arg PROJECT_RELEASE='${OS_VERSION}' \
+#  --build-arg PROJECT="gnocchi" \
+#  --build-arg PIP_PACKAGES='${OS_PIP_PKGS[@]} ${STABLE_VERSION_REQUIREMENTS[${OS_VERSION}]} /tmp/gnocchi[keystone,mysql,postgresql,s3,redis,swift,ceph,prometheus,amqp1] tooz[consul,etcd,etcd3,etcd3gw,redis,postgresql,mysql,zookeeper,memcached]' \
+#  --build-arg PROJECT_REPO="https://github.com/gnocchixyz/gnocchi" \
+#  --build-arg PROJECT_REF="stable/4.4" \
+#  "${LOCI_LXD_LOCATION}" \
+#&& docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/gnocchi:${OS_TAG}")
 
     #--build-arg WHEELS="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/requirements:${OS_TAG}"
-for i in keystone glance cinder neutron nova placement heat ceilometer aodh barbican octavia designate manila ironic magnum senlin trove; do
+for i in keystone glance cinder neutron nova placement heat octavia ceilometer aodh designate; do  #barbican manila ironic magnum senlin trove; do
   docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" || (docker build --force-rm ${LOCI_COMMON_BUILD_ARGS[@]} \
     -t "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/\${i}:${OS_TAG}" \
     --build-arg PROJECT="\${i}" \
@@ -153,27 +160,33 @@ docker pull "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${O
 && docker push "${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}/openstack/horizon:${OS_TAG}")
 
 systemctl stop docker
-zypper rm -uy docker
+#zypper rm -uy docker
+DEBIAN_FRONTEND=noninteractive apt -y purge docker.io
 ip link delete docker0
 EOF
 }
 
 up(){
+  #HTTP_PROXY="http://${REGISTRY_PROXY_HOSTNAME}:3128" \
+  #HTTPS_PROXY="http://${REGISTRY_PROXY_HOSTNAME}:3128" \
+  #NO_PROXY="$(string_join , ${KUBE_NOPROXY_SETTING[@]})" \
   "${MYDIR}/../kubedee/kubedee" up "${CLUSTER_NAME}" \
     --apiserver-extra-hostnames "kubernetes.default,kubernetes.default.svc,kubernetes.default.svc.cluster.local" \
-    --enable-insecure-registry --vm \
+    --enable-insecure-registry --vm --routed \
     --num-worker "${NUM_WORKERS}" \
     --kubernetes-version "v${K8S_VERSION}" \
+    --controller-limits-cpu $(($(nproc)-1)) \
     --controller-limits-memory "${CONTROLLER_MEMORY_SIZE}" \
+    --worker-limits-cpu $(($(nproc)-1)) \
     --worker-limits-memory "${WORKER_MEMORY_SIZE}" \
     --storage-pool "${LXD_STORAGE_POOL}" \
-    --rootfs-size "30GiB"
+    --rootfs-size "48GiB"
 
-  export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" \
-    LOCAL_REGISTRY_PORT="5000"
+  export LOCAL_REGISTRY_HOST="kubedee-${CLUSTER_NAME}-registry" LOCAL_REGISTRY_PORT="5000"
 
   KUBE_NOPROXY_SETTING+=("${LOCAL_REGISTRY_HOST}")
-  KUBEDEE_IFACE="$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")"
+  local KUBEDEE_NET="$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")"
+  #lxc network create "kd-ext-${KUBEDEE_NET##*-}" ipv6.address=none ipv4.address=172.24.4.1/24
 
   if true; then
     registry_proxy_post::kubedee
@@ -190,20 +203,25 @@ up(){
 
   [ -z "${POPULATE_LOCAL_REGISTRY}" ] || populate_local_registry
 
-  # volume setup
   local i j
   for i in $(lxc list -cn --format csv | grep -E "^kubedee-${CLUSTER_NAME}-worker-"); do
-    lxc exec "${i}" -- /bin/sh <<'EOF'
-zypper in -ly lvm2 open-iscsi
-# http://blog.father.gedow.net/2013/05/21/ceph-as-cinder-storage/
-InitiatorName=$(iscsi-iname) > /etc/iscsi/initiatorname.iscsi
-EOF
+#    lxc exec "${i}" -- /bin/sh <<'EOF'
+##zypper in -ly lvm2 open-iscsi
+#DEBIAN_FRONTEND=noninteractive apt -y --no-install-recommends install lvm2 open-iscsi
+## http://blog.father.gedow.net/2013/05/21/ceph-as-cinder-storage/
+#InitiatorName=$(iscsi-iname) > /etc/iscsi/initiatorname.iscsi
+#EOF
     lxc stop "${i}" ||:
+    #lxc config device add "${i}" eth1 nic name=eth1 network="kd-ext-${KUBEDEE_NET##*-}"
+    #lxc network attach "kd-ext-${KUBEDEE_NET##*-}" "${i}" eth1 eth1
     for j in {b..g}; do
-      lxc storage volume create "${LXD_STORAGE_POOL}" "${i}-sd${j}" size="${VOLUME_SIZE}" --type block
-      [ -n "$(lxc config device get "${i}" "${i}-sd${j}" source)" ] || until lxc storage volume attach "${LXD_STORAGE_POOL}" "${i}-sd${j}" "${i}" ''; do :; done
+      local volname="${CLUSTER_NAME}-${i##*-}-${j}"  # "${volname:${voltrunc}:27}"
+      [ "$((${#volname}-27))" -ge 0 ] && voltrunc="$((${#volname}-27))" || voltrunc=0
+      lxc storage volume create "${LXD_STORAGE_POOL}" "${volname:${voltrunc}:27}" size="${VOLUME_SIZE}" --type block &>/dev/null
+      [ -n "$(lxc config device get "${i}" "${i}-sd${j}" source 2>/dev/null )" ] || until lxc storage volume attach "${LXD_STORAGE_POOL}" "${volname:${voltrunc}:27}" "${i}" '' &>/dev/null; do :; done
     done
     lxc start "${i}"
+    until lxc exec "${i}" -- hostname &>/dev/null; do lxc restart -f "${i}"; echo "Waiting for ${i} to boot after attaching additional volumes..."; sleep 15; done
   done
 
   #export CEPH_MON_COUNT="${NUM_WORKERS}"
@@ -213,17 +231,22 @@ EOF
   setup_helm
 
   #ROOK_NETWORK="$(lxc network get "$(cat ~/.local/share/kubedee/clusters/rookery/network_id)" ipv4.address)" \
+  #KUBE_API_IP="$(kubectl -n default get svc/kubernetes -o jsonpath='{.spec.clusterIP}')" \
   LOCAL_REGISTRY_ADDRESS="${LOCAL_REGISTRY_HOST}:${LOCAL_REGISTRY_PORT}" \
-  helmfile -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" sync
+  helmfile ${SCRIPT_DEBUG:+--debug} -b "${HELM_BIN}" --no-color --allow-no-matching-release -f "${MYDIR}/helmfile.yaml" apply ${SCRIPT_DEBUG:+--skip-cleanup}
 
   "${MYDIR}/../kubedee/kubedee" kubectl-env "${CLUSTER_NAME}"
+  # ceph progress clear during "Global Recovery Event" in Ceph cluster  # https://tracker.ceph.com/issues/49988
 }
 
 down(){
   set +e
+  local KUBEDEE_NET="$(cat "${HOME}/.local/share/kubedee/clusters/${CLUSTER_NAME}/network_id")"
   "${MYDIR}/../kubedee/kubedee" delete "${CLUSTER_NAME}"
+  #lxc network show "kd-ext-${KUBEDEE_NET##*-}" && \
+  #lxc network delete "kd-ext-${KUBEDEE_NET##*-}"
   docker rm -fv "${REGISTRY_PROXY_HOSTNAME}"
-  for i in $(lxc storage volume list "${LXD_STORAGE_POOL}" --format csv | awk -F, "/(^|,)kubedee-${CLUSTER_NAME}-worker-/ {print \$2}"); do
+  for i in $(lxc storage volume list "${LXD_STORAGE_POOL}" --format csv | awk -F, "/(^|,)(kubedee-${CLUSTER_NAME}-worker|${CLUSTER_NAME})-/ {print \$2}"); do
     lxc storage volume delete "${LXD_STORAGE_POOL}" "${i}"
   done
   set -e
@@ -232,13 +255,13 @@ down(){
 main(){
   : ${LXD_STORAGE_POOL:=default}
   : ${CLUSTER_NAME:=rookery}
-  : ${NUM_WORKERS:=1}
-  : ${K8S_VERSION:=1.22.3}
-  : ${OS_VERSION:=xena}
+  : ${NUM_WORKERS:=2}
+  : ${K8S_VERSION:=1.26.2}
+  : ${OS_VERSION:=zed}
   : ${BASE_IMAGE:=ubuntu_focal}
-  : ${CONTROLLER_MEMORY_SIZE:=2GiB}
-  : ${WORKER_MEMORY_SIZE:=12GiB}
-  : ${CEPH_VERSION:=16.2.5}
+  : ${CONTROLLER_MEMORY_SIZE:=4GiB}
+  : ${WORKER_MEMORY_SIZE:=18GiB}
+  : ${CEPH_VERSION:=17.2.5}
   #NUM_VOLUMES="${NUM_VOLUMES:-2}"
 
   local SCRIPT_OP
@@ -272,7 +295,7 @@ main(){
 
   export BASE_IMAGE CEPH_VERSION OS_VERSION \
       OS_TAG="${OS_VERSION}-${BASE_IMAGE}" \
-      VOLUME_SIZE="${VOLUME_SIZE:-15GiB}"
+      VOLUME_SIZE="${VOLUME_SIZE:-10GiB}"
   : ${REGISTRY_PROXY_HOSTNAME:="kubedee-${CLUSTER_NAME}-registry-proxy-cache.local"}
   : ${REGISTRY_PROXY_HOST_PATH:=/var/tmp/oci-registry}
 

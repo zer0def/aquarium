@@ -179,7 +179,7 @@ releases:
       kubectl -n {{ .Values.namespaces.storage }} exec -i $(kubectl -n {{ .Values.namespaces.storage }} get pods -o jsonpath="{.items[?(@.metadata.labels.release==\"${MC_NAME}\")].metadata.name}" | awk '{print $1}') -- /bin/sh -ex <<'EOF'
       until curl http://{{ $s3.endpoint }} &>/dev/null; do sleep 3; done
       mc config host add seaweedfs http://{{ $s3.endpoint }} {{ $s3.accessKey | quote }} {{ $s3.secretKey | quote }}
-      for i in {{ .Values.thanosObjstoreConfig.bucket }} {{ .Values.harbor.bucket }} {{ .Values.sentry.bucket }} {{ .Values.cortex.buckets.blocks }} {{ .Values.cortex.buckets.notify }} {{ .Values.loki.buckets.chunks }} {{ .Values.loki.buckets.notify }} {{ .Values.patroni.walBucket }} {{ .Values.gitlab.buckets.registry }} {{ .Values.osp.bucket }}; do
+      for i in {{ .Values.thanosObjstoreConfig.bucket }} {{ .Values.harbor.bucket }} {{ .Values.sentry.bucket }} {{ .Values.cortex.buckets.blocks }} {{ .Values.cortex.buckets.notify }} {{ .Values.loki.buckets.chunks }} {{ .Values.loki.buckets.notify }} {{ .Values.patroni.walBucket }} {{ .Values.gitlab.buckets.registry }} {{ .Values.osp.bucket }} {{ .Values.kafka.bucket }} {{ .Values.skydive.bucket }}; do
         mc ls "seaweedfs/${i}" || mc mb "seaweedfs/${i}"
       done
       EOF
@@ -286,6 +286,7 @@ releases:
         parameters:
           log_destination: stderr
           logging_collector: "off"
+          password_encryption: md5  # not particularly safe, but Harbor's not exactly bright either: https://github.com/goharbor/harbor/issues/16135
           shared_preload_libraries: citus,timescaledb
           timescaledb.license: timescale  # it's a trap!
           timescaledb.telemetry_level: "off"
@@ -456,6 +457,7 @@ releases:
     port: {{ .Values.redis.ports.readwrite }}
     configExtraArgs:
     - databases: {{ .Values.redis.databaseCount }}
+    #- sentinel:
     #loadBalancer:
     #  enabled: true
     exporter:
@@ -477,8 +479,18 @@ releases:
       tag: "v{{ .Values.versions.images.redPanda }}"
     statefulset:
       replicas: {{ .Values.kafka.replicas }}
-    config:  # https://vectorized.io/docs/configuration/
+    config:  # https://vectorized.io/docs/configuration/ # https://docs.redpanda.com/docs/manage/cluster-maintenance/configuration/
       redpanda:
+        auto_create_topics_enabled: true
+        cloud_storage_access_key: {{ $s3.accessKey | quote }}
+        cloud_storage_api_endpoint: {{ printf "%s-s3.%s.svc" .Values.releases.seaweedfs .Values.namespaces.storage }}
+        cloud_storage_api_endpoint_port: {{ .Values.seaweedfs.ports.http.s3 }}
+        cloud_storage_bucket: {{ .Values.kafka.bucket }}
+        cloud_storage_disable_tls: true
+        cloud_storage_enabled: true
+        cloud_storage_region: us-east-1
+        cloud_storage_secret_key: {{ $s3.secretKey | quote }}
+        #default_topic_replications: 3
         admin:
           address: "0.0.0.0"
         rpc_server:

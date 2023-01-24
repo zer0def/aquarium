@@ -34,3 +34,7 @@ Options:
 ### Project status
 
 I'm amazed it actually kind of works. Take this at face value.
+
+### Transitive issues
+
+Pods not coming up or crashing because they're unable to resolve their dependency service's domain name: `kubectl -n kube-system rollout restart ds/kube-flannel-ds deploy/coredns`
